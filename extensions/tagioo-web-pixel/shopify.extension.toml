@@ -1,0 +1,26 @@
+api_version = "2026-07"
+type = "web_pixel_extension"
+name = "Tagioo web pixel"
+runtime_context = "strict"
+uid = "5fbc8e14-43ee-051f-9de6-91b5bcee53cb878d1b37"
+
+[customer_privacy]
+analytics = true
+marketing = true
+preferences = false
+sale_of_data = "enabled"
+
+[settings]
+type = "object"
+
+[settings.fields.trackingDomain]
+name = "Tagioo tracking domain"
+description = "The customer's first-party Tagioo sGTM domain"
+type = "single_line_text_field"
+validations = [{ name = "min", value = "8" }]
+
+[settings.fields.measurementId]
+name = "GA4 measurement ID"
+description = "The GA4 measurement ID configured in Tagioo"
+type = "single_line_text_field"
+validations = [{ name = "min", value = "3" }]
