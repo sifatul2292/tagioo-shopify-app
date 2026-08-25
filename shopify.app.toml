@@ -36,15 +36,6 @@ api_version = "2026-07"
   uri = "/webhooks/shop/redact"
   compliance_topics = [ "shop/redact" ]
 
-[events]
-api_version = "2026-07"
-
-  [[events.subscription]]
-  handle = "tagioo_order_created"
-  topic = "Order"
-  actions = [ "create" ]
-  uri = "/events/orders"
-
 [auth]
 redirect_urls = [ "https://shopify.dev/apps/default-app-home/api/auth" ]
 
