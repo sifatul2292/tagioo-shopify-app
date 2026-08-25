@@ -35,7 +35,7 @@ Set these environment variables on the app host:
 SHOPIFY_API_KEY=your_shopify_client_id
 SHOPIFY_API_SECRET=your_shopify_client_secret
 SHOPIFY_APP_URL=https://your-app-host.example.com
-SCOPES=read_orders,read_pixels,write_pixels
+SCOPES=read_orders,read_pixels,write_pixels,read_customer_events
 TAGIOO_API_URL=https://tagioo.com
 ```
 
