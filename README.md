@@ -41,7 +41,7 @@ TAGIOO_API_URL=https://tagioo.com
 
 Do not commit `.env`, Shopify secrets, session databases, or tenant integration tokens.
 
-The production app host is `https://shopify-app.tagioo.com`. Persist
+The production app host is `https://connect.tagioo.com`. Persist
 `prisma/dev.sqlite` on a private volume for a single-instance deployment; move
 the Prisma datasource to a managed database before running multiple app instances.
 
