@@ -1,6 +1,8 @@
 import { authenticate } from "../shopify.server";
+import { sendPrivacyEventToTagioo } from "../tagioo.server";
 
 export const action = async ({ request }) => {
-  await authenticate.webhook(request);
+  const { payload, topic, shop } = await authenticate.webhook(request);
+  await sendPrivacyEventToTagioo({ shop, payload, topic });
   return new Response();
 };

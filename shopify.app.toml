@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "65877316e22439815de79ebfd37e3417"
-application_url = "https://shopify.dev/apps/default-app-home"
+application_url = "https://shopify-app.tagioo.com"
 embedded = true
 name = "Tagioo Tracking"
 
@@ -37,7 +37,7 @@ api_version = "2026-07"
   compliance_topics = [ "shop/redact" ]
 
 [auth]
-redirect_urls = [ "https://shopify.dev/apps/default-app-home/api/auth" ]
+redirect_urls = [ "https://shopify-app.tagioo.com/auth/callback" ]
 
 [build]
 include_config_on_deploy = true

@@ -29,6 +29,7 @@ export async function sendOrderToTagioo({ shop, order, topic }) {
     status: topic === "ORDERS_PAID" ? "paid" : String(order.financial_status || ""),
     order_type: "shopify",
     source: "tagioo-shopify-app",
+    customer_id: String(order.customer?.admin_graphql_api_id || order.customer?.id || ""),
     email: order.email || order.customer?.email || "",
     phone: order.phone || order.billing_address?.phone || order.customer?.phone || "",
     first_name: order.billing_address?.first_name || order.customer?.first_name || "",
@@ -71,6 +72,33 @@ export async function sendOrderToTagioo({ shop, order, topic }) {
     where: { shop },
     data: { lastOrderAt: new Date(), lastError: null },
   });
+  return result;
+}
+
+export async function sendPrivacyEventToTagioo({ shop, payload, topic }) {
+  const connection = await db.storeConnection.findUnique({ where: { shop } });
+  if (!connection || connection.status !== "connected") return { skipped: true };
+
+  const body = JSON.stringify({ shop, topic, payload });
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const signature = crypto
+    .createHmac("sha256", connection.integrationToken)
+    .update(`${timestamp}.${body}`)
+    .digest("hex");
+  const response = await fetch(
+    `${baseUrl}/api/integrations/shopify/privacy?tenant=${encodeURIComponent(connection.tenantId)}`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-tagioo-timestamp": timestamp,
+        "x-tagioo-signature": signature,
+      },
+      body,
+    },
+  );
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || `Tagioo returned HTTP ${response.status}.`);
   return result;
 }
 
