@@ -1,5 +1,7 @@
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import { disconnectShopifyBilling } from "../billing.server";
+import { deleteQueuedOrdersForShop } from "../order-delivery.server";
 
 export const action = async ({ request }) => {
   const { shop, session, topic } = await authenticate.webhook(request);
@@ -11,6 +13,9 @@ export const action = async ({ request }) => {
   if (session) {
     await db.session.deleteMany({ where: { shop } });
   }
+  const connection = await db.storeConnection.findUnique({ where: { shop } });
+  await disconnectShopifyBilling(connection);
+  await deleteQueuedOrdersForShop(shop);
   await db.storeConnection.deleteMany({ where: { shop } });
 
   return new Response();

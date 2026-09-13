@@ -35,6 +35,7 @@ model Session {
 
 model StoreConnection {
   shop             String   @id
+  shopId           String?
   tenantId         String
   tenantName       String?
   trackingDomain   String
@@ -44,6 +45,27 @@ model StoreConnection {
   status           String   @default("connected")
   lastOrderAt      DateTime?
   lastError        String?
+  billingPlan      String   @default("Free")
+  billingStatus    String   @default("free")
+  billingCycleEnd  DateTime?
+  billingCancelAtEnd Boolean @default(false)
+  billingMissingSince DateTime?
+  billingSyncedAt  DateTime?
+  billingLastError String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+}
+
+model OrderDelivery {
+  id            String   @id
+  shop          String
+  topic         String
+  payload       String
+  attempts      Int      @default(0)
+  nextAttemptAt DateTime @default(now())
+  lastError     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([nextAttemptAt])
 }

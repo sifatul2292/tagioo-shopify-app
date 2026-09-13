@@ -5,7 +5,8 @@ Official Shopify app for connecting a Shopify store to an existing Tagioo server
 ## What it does
 
 - Installs a Shopify Web Pixel extension for page, product, cart, checkout, and browser Purchase events.
-- Receives Shopify's signed `orders/paid` webhook and forwards a second, tenant-signed Purchase to Tagioo.
+- Receives Shopify's signed `orders/paid` webhook, durably queues it in SQLite,
+  and forwards a second, tenant-signed Purchase to Tagioo with background retries.
 - Uses the Shopify order ID for both browser and backend Purchase so downstream Meta/GA4 tags can deduplicate.
 - Keeps every store isolated with a unique integration token created from a short-lived Tagioo connection code.
 
@@ -37,7 +38,19 @@ SHOPIFY_API_SECRET=your_shopify_client_secret
 SHOPIFY_APP_URL=https://your-app-host.example.com
 SCOPES=read_orders,read_pixels,write_pixels,read_customer_events
 TAGIOO_API_URL=https://tagioo.com
+SHOPIFY_BILLING_ENABLED=false
+SHOPIFY_APP_HANDLE=tagioo-tracking
+SHOPIFY_PARTNER_ORG_ID=your_partner_organization_id
+SHOPIFY_PARTNER_APP_ID=gid://shopify/App/your_numeric_app_id
+SHOPIFY_PARTNER_API_ACCESS_TOKEN=your_partner_api_client_token
 ```
+
+Shopify billing remains disabled until managed pricing plans and matching plan
+handles are configured in the Partner Dashboard. When enabled, connected stores
+receive 15,000 events per rolling 30-day cycle for free. Reaching the limit pauses
+tracking; the merchant must explicitly approve a paid Shopify plan to resume with
+the paid limit. The app verifies that subscription through Shopify's Partner API
+and signs the resulting entitlement update to Tagioo.
 
 Do not commit `.env`, Shopify secrets, session databases, or tenant integration tokens.
 
