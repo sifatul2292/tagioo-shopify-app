@@ -1,4 +1,5 @@
 import db from "./db.server";
+import { disconnectShopifyBilling } from "./billing.server";
 import { sendOrderToTagioo } from "./tagioo.server";
 
 const POLL_INTERVAL_MS = 5_000;
@@ -35,8 +36,24 @@ export async function enqueueOrderDelivery({ shop, order, topic }) {
   runOrderDeliveryWorker();
 }
 
+export async function enqueueAppUninstall(connection) {
+  if (!connection) return;
+  const { shop } = connection;
+  const payload = JSON.stringify(connection);
+  await db.$transaction([
+    db.orderDelivery.upsert({
+      where: { id: `${shop}:app-uninstalled` },
+      create: { id: `${shop}:app-uninstalled`, shop, topic: "APP_UNINSTALLED", payload },
+      update: { payload, attempts: 0, nextAttemptAt: new Date(), lastError: null },
+    }),
+    db.session.deleteMany({ where: { shop } }),
+    db.orderDelivery.deleteMany({ where: { shop, topic: { not: "APP_UNINSTALLED" } } }),
+    db.storeConnection.deleteMany({ where: { shop } }),
+  ]);
+}
+
 export async function deleteQueuedOrdersForShop(shop) {
-  await db.orderDelivery.deleteMany({ where: { shop } });
+  await db.orderDelivery.deleteMany({ where: { shop, topic: { not: "APP_UNINSTALLED" } } });
 }
 
 export async function deleteQueuedOrdersForCustomer(shop, payload) {
@@ -69,11 +86,16 @@ export async function flushOrderDeliveries() {
     });
     for (const delivery of deliveries) {
       try {
-        await sendOrderToTagioo({
-          shop: delivery.shop,
-          order: JSON.parse(delivery.payload),
-          topic: delivery.topic,
-        });
+        const payload = JSON.parse(delivery.payload);
+        if (delivery.topic === "APP_UNINSTALLED") {
+          const reconnected = await db.storeConnection.findUnique({ where: { shop: delivery.shop } });
+          const sameConnection = reconnected
+            && reconnected.tenantId === payload.tenantId
+            && reconnected.integrationToken === payload.integrationToken;
+          if (!sameConnection) await disconnectShopifyBilling(payload);
+        } else {
+          await sendOrderToTagioo({ shop: delivery.shop, order: payload, topic: delivery.topic });
+        }
         await db.orderDelivery.delete({ where: { id: delivery.id } });
       } catch (error) {
         const attempts = delivery.attempts + 1;

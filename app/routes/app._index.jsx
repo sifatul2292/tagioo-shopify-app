@@ -12,7 +12,13 @@ export const loader = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
   let connection = await db.storeConnection.findUnique({ where: { shop: session.shop } });
   if (connection && !connection.shopId) {
-    const response = await admin.graphql(`#graphql { shop { id } }`);
+    const response = await admin.graphql(`#graphql
+      query LoadShopId {
+        shop {
+          id
+        }
+      }
+    `);
     const result = await response.json();
     const shopId = result.data?.shop?.id || "";
     if (shopId) connection = await db.storeConnection.update({ where: { shop: session.shop }, data: { shopId } });
@@ -48,7 +54,13 @@ export const action = async ({ request }) => {
 
   try {
     const linked = await redeemConnectionCode({ code, shop: session.shop });
-    const shopResponse = await admin.graphql(`#graphql { shop { id } }`);
+    const shopResponse = await admin.graphql(`#graphql
+      query ConnectShopId {
+        shop {
+          id
+        }
+      }
+    `);
     const shopResult = await shopResponse.json();
     const shopId = shopResult.data?.shop?.id || null;
     const existing = await db.storeConnection.findUnique({ where: { shop: session.shop } });

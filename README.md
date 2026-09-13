@@ -43,6 +43,10 @@ SHOPIFY_APP_HANDLE=tagioo-tracking
 SHOPIFY_PARTNER_ORG_ID=your_partner_organization_id
 SHOPIFY_PARTNER_APP_ID=gid://shopify/App/your_numeric_app_id
 SHOPIFY_PARTNER_API_ACCESS_TOKEN=your_partner_api_client_token
+SHOPIFY_PLAN_HANDLE_FREE=free
+SHOPIFY_PLAN_HANDLE_STARTER=starter
+SHOPIFY_PLAN_HANDLE_PRO=pro
+SHOPIFY_PLAN_HANDLE_ENTERPRISE=enterprise
 ```
 
 Shopify billing remains disabled until managed pricing plans and matching plan
@@ -66,6 +70,7 @@ Before releasing:
 
 ```bash
 pnpm lint
+pnpm test
 pnpm typecheck
 pnpm build
 pnpm shopify app config validate --json

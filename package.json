@@ -12,6 +12,7 @@
     "start": "react-router-serve ./build/server/index.js",
     "docker-start": "npm run setup && npm run start",
     "setup": "node scripts/ensure-sqlite.mjs && prisma generate && prisma migrate deploy",
+    "test": "node --test app/*.test.js",
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint --ignore-path .gitignore --cache --cache-location ./node_modules/.cache/eslint .",
     "shopify": "shopify",
     "prisma": "prisma",

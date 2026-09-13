@@ -1,3 +1,31 @@
-.cache
-build
+# Dependencies and generated build output
 node_modules
+.cache
+.react-router
+build
+app/build
+public/build
+extensions/*/dist
+coverage
+
+# Local tooling and source-control metadata
+.git
+.gitignore
+.shopify
+.shopify.lock
+.DS_Store
+
+# Runtime configuration and secrets
+.env
+.env.*
+secrets
+*.key
+*.pem
+
+# Local databases and logs (keep prisma/schema.prisma and migrations)
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.log
+logs

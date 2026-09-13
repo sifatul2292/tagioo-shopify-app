@@ -1,10 +1,16 @@
 import crypto from "node:crypto";
 import db from "./db.server";
+import { shopifyOrderId } from "./shopify-order-id";
 
 const baseUrl = String(process.env.TAGIOO_API_URL || "https://tagioo.com").replace(/\/$/, "");
+const requestTimeoutMs = 10_000;
+
+function tagiooFetch(url, options) {
+  return fetch(url, { ...options, signal: AbortSignal.timeout(requestTimeoutMs) });
+}
 
 export async function redeemConnectionCode({ code, shop }) {
-  const response = await fetch(`${baseUrl}/api/integrations/shopify/connect`, {
+  const response = await tagiooFetch(`${baseUrl}/api/integrations/shopify/connect`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ code: String(code || "").trim(), shop }),
@@ -21,7 +27,7 @@ export async function sendOrderToTagioo({ shop, order, topic }) {
   if (!connection || connection.status !== "connected") return { skipped: true };
 
   const payload = JSON.stringify({
-    order_id: String(order.admin_graphql_api_id || order.id || ""),
+    order_id: shopifyOrderId(order),
     display_order_id: String(order.name || order.order_number || order.id || ""),
     total: order.current_total_price || order.total_price,
     currency: order.currency || order.presentment_currency,
@@ -54,7 +60,7 @@ export async function sendOrderToTagioo({ shop, order, topic }) {
     .update(`${timestamp}.${payload}`)
     .digest("hex");
 
-  const response = await fetch(
+  const response = await tagiooFetch(
     `${baseUrl}/api/orders/shopify?tenant=${encodeURIComponent(connection.tenantId)}`,
     {
       method: "POST",
@@ -85,7 +91,7 @@ export async function sendPrivacyEventToTagioo({ shop, payload, topic }) {
     .createHmac("sha256", connection.integrationToken)
     .update(`${timestamp}.${body}`)
     .digest("hex");
-  const response = await fetch(
+  const response = await tagiooFetch(
     `${baseUrl}/api/integrations/shopify/privacy?tenant=${encodeURIComponent(connection.tenantId)}`,
     {
       method: "POST",
