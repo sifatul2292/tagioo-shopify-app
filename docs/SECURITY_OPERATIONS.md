@@ -1,8 +1,11 @@
 # Shopify protected-data operations
 
-Status: **adopted and in force**  
-Effective date: 2026-09-25  
-Owner: Tagioo owner/operator  
+Status: **adopted and in force**
+
+Effective date: 2026-09-25
+
+Owner: Tagioo owner/operator
+
 Review cycle: quarterly and after every security incident or material system change
 
 ## Scope and data flow
