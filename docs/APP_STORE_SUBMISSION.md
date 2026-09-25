@@ -64,19 +64,28 @@ connected stores.
 
 ## Still required before submission
 
-- Upload the 1200 × 1200 app icon.
-- Capture compliant screenshots without browser chrome or personal data.
-- Record and host a 3–8 minute English screencast covering both the Tagioo
-  customer flow and the embedded Shopify flow.
-- Create a dedicated reviewer account that does not require Google SSO or 2FA.
-- Add emergency contact details in the Partner account.
 - Complete the protected-customer-data questionnaire truthfully. Do not claim
   encryption at rest, encrypted backups, production/test separation, DLP,
   access auditing, or an incident-response policy until each control is
   implemented and verified.
-- Enable production Shopify billing only after the Partner API credentials are
-  stored on the VPS and Free → paid → downgrade/cancel tests pass.
-- Run Shopify's automated checks and resolve all failures.
-- Select app capabilities and complete the AI self-review.
+- Configure Shopify Partner payouts with the owner's verified identity and bank
+  details.
+- Mark the completed AI self-review in the Partner Dashboard. The review report
+  is `docs/SHOPIFY_AI_SELF_REVIEW_2026-09-25.md`.
+- Remove the temporary production diagnostic file
+  `/app/build/client/diag-925b7.json` after deployment verification.
 - Obtain confirmation immediately before saving/submitting listing content,
   protected-data responses, credentials, contact details, or the final review.
+
+## Verified complete on 2026-09-25
+
+- App icon, English listing, three compliant screenshots, and hosted listing
+  video are present in the Partner Dashboard.
+- The dedicated reviewer account and workspace connect successfully.
+- Emergency contact, automated checks, and embedded-app checks are complete.
+- Production Shopify Managed Pricing completed Free → Starter → Free on the
+  development store without a real charge.
+- Paid Shopify order `#1007` produced one unique Purchase in Tagioo; browser and
+  backend copies shared order/event ID `19060219740464`.
+- Shopify CLI configuration validation, unit tests, lint, typecheck, and the
+  production build pass under Node 22.
