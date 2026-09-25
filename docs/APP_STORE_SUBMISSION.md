@@ -70,10 +70,6 @@ connected stores.
   implemented and verified.
 - Configure Shopify Partner payouts with the owner's verified identity and bank
   details.
-- Mark the completed AI self-review in the Partner Dashboard. The review report
-  is `docs/SHOPIFY_AI_SELF_REVIEW_2026-09-25.md`.
-- Remove the temporary production diagnostic file
-  `/app/build/client/diag-925b7.json` after deployment verification.
 - Obtain confirmation immediately before saving/submitting listing content,
   protected-data responses, credentials, contact details, or the final review.
 
@@ -83,6 +79,10 @@ connected stores.
   video are present in the Partner Dashboard.
 - The dedicated reviewer account and workspace connect successfully.
 - Emergency contact, automated checks, and embedded-app checks are complete.
+- The AI self-review is marked complete in the Partner Dashboard; its report is
+  `docs/SHOPIFY_AI_SELF_REVIEW_2026-09-25.md`.
+- The temporary production diagnostic file was removed and its public URL now
+  returns HTTP 404.
 - Production Shopify Managed Pricing completed Free → Starter → Free on the
   development store without a real charge.
 - Paid Shopify order `#1007` produced one unique Purchase in Tagioo; browser and
