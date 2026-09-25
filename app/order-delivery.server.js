@@ -1,6 +1,7 @@
 import db from "./db.server";
 import { disconnectShopifyBilling } from "./billing.server";
 import { sendOrderToTagioo } from "./tagioo.server";
+import { orderDeliveryPayload } from "./shopify-order-payload";
 
 const POLL_INTERVAL_MS = 5_000;
 const MAX_RETRY_DELAY_MS = 15 * 60_000;
@@ -29,7 +30,7 @@ export async function enqueueOrderDelivery({ shop, order, topic }) {
       id: deliveryId(shop, order),
       shop,
       topic,
-      payload: JSON.stringify(order),
+      payload: JSON.stringify(orderDeliveryPayload(order)),
     },
     update: {},
   });
