@@ -2,6 +2,7 @@ import db from "./db.server";
 import { disconnectShopifyBilling } from "./billing.server";
 import { sendOrderToTagioo } from "./tagioo.server";
 import { orderDeliveryPayload } from "./shopify-order-payload";
+import { decodeProtectedPayload, encodeProtectedPayload } from "./protected-payload";
 
 const POLL_INTERVAL_MS = 5_000;
 const MAX_RETRY_DELAY_MS = 15 * 60_000;
@@ -30,7 +31,7 @@ export async function enqueueOrderDelivery({ shop, order, topic }) {
       id: deliveryId(shop, order),
       shop,
       topic,
-      payload: JSON.stringify(orderDeliveryPayload(order)),
+      payload: encodeProtectedPayload(orderDeliveryPayload(order)),
     },
     update: {},
   });
@@ -40,7 +41,7 @@ export async function enqueueOrderDelivery({ shop, order, topic }) {
 export async function enqueueAppUninstall(connection) {
   if (!connection) return;
   const { shop } = connection;
-  const payload = JSON.stringify(connection);
+  const payload = encodeProtectedPayload(connection);
   await db.$transaction([
     db.orderDelivery.upsert({
       where: { id: `${shop}:app-uninstalled` },
@@ -63,7 +64,7 @@ export async function deleteQueuedOrdersForCustomer(shop, payload) {
   const deliveries = await db.orderDelivery.findMany({ where: { shop } });
   const ids = deliveries.flatMap((delivery) => {
     try {
-      const order = JSON.parse(delivery.payload);
+      const order = decodeProtectedPayload(delivery.payload);
       const queuedCustomerId = String(order.customer?.id || "");
       const queuedOrderId = String(order.id || "");
       return (customerId && queuedCustomerId === customerId) || orderIds.has(queuedOrderId)
@@ -87,7 +88,7 @@ export async function flushOrderDeliveries() {
     });
     for (const delivery of deliveries) {
       try {
-        const payload = JSON.parse(delivery.payload);
+        const payload = decodeProtectedPayload(delivery.payload);
         if (delivery.topic === "APP_UNINSTALLED") {
           const reconnected = await db.storeConnection.findUnique({ where: { shop: delivery.shop } });
           const sameConnection = reconnected
