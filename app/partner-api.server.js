@@ -35,7 +35,7 @@ export async function fetchActiveSubscription(shopId) {
 
   const response = await fetch(`https://partners.shopify.com/${organizationId}/api/${API_VERSION}/graphql.json`, {
     method: "POST",
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(30_000),
     headers: {
       "content-type": "application/json",
       "x-shopify-access-token": accessToken,
