@@ -39,21 +39,32 @@ async function sendBillingStateToTagioo(connection, state) {
     },
   );
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.error || result.errors?.[0] || `Tagioo returned HTTP ${response.status}.`);
+  if (!response.ok) {
+    const error = new Error(result.error || result.errors?.[0] || `Tagioo returned HTTP ${response.status}.`);
+    error.status = response.status;
+    throw error;
+  }
 }
 
 export async function disconnectShopifyBilling(connection) {
   if (!connection || !shopifyBillingEnabled()) return { skipped: true };
-  await sendBillingStateToTagioo(connection, {
-    plan: "Free",
-    status: "disconnected",
-    billingPeriod: "",
-    cycleStart: "",
-    cycleEnd: "",
-    cancelAtEndOfCycle: false,
-    amount: 0,
-    currency: "USD",
-  });
+  try {
+    await sendBillingStateToTagioo(connection, {
+      plan: "Free",
+      status: "disconnected",
+      billingPeriod: "",
+      cycleStart: "",
+      cycleEnd: "",
+      cancelAtEndOfCycle: false,
+      amount: 0,
+      currency: "USD",
+    });
+  } catch (error) {
+    // A revoked connection cannot change remote billing, but must not prevent
+    // removal of the local pixel/connection (including uninstall retries).
+    if (error.status === 401) return { disconnected: true, staleAuthorization: true };
+    throw error;
+  }
   return { disconnected: true };
 }
 
