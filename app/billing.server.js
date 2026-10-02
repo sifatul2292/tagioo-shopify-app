@@ -12,6 +12,7 @@ const CACHE_MS = 5 * 60_000;
 const MISSING_GRACE_MS = 24 * 60 * 60_000;
 const RECONCILE_MS = 6 * 60 * 60_000;
 let reconciliationRunning = false;
+const pendingBillingSyncs = new Map();
 
 function subscriptionAmount(subscription) {
   const price = (subscription?.items || []).find((item) => item.price?.__typename === "FlatRatePrice")?.price;
@@ -68,7 +69,15 @@ export async function disconnectShopifyBilling(connection) {
   return { disconnected: true };
 }
 
-export async function syncShopifyBilling(connection, { force = false } = {}) {
+export function syncShopifyBilling(connection, options = {}) {
+  if (!connection) return Promise.resolve({ configured: false, plan: "Free" });
+  if (pendingBillingSyncs.has(connection.shop)) return pendingBillingSyncs.get(connection.shop);
+  const pending = syncShopifyBillingState(connection, options).finally(() => pendingBillingSyncs.delete(connection.shop));
+  pendingBillingSyncs.set(connection.shop, pending);
+  return pending;
+}
+
+async function syncShopifyBillingState(connection, { force = false } = {}) {
   if (!connection || !connection.shopId || !shopifyBillingEnabled()) {
     return { configured: false, plan: connection?.billingPlan || "Free" };
   }
@@ -129,7 +138,7 @@ export async function syncShopifyBilling(connection, { force = false } = {}) {
     const message = error instanceof Error ? error.message : String(error);
     await db.storeConnection.updateMany({
       where: { shop: connection.shop },
-      data: { billingLastError: message },
+      data: { billingLastError: message, billingSyncedAt: new Date() },
     });
     throw error;
   }

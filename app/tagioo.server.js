@@ -150,9 +150,11 @@ export async function deleteWebPixel(admin, pixelId) {
           userErrors { field message }
         }
       }`,
-    { variables: { id: pixelId } },
+    { variables: { id: pixelId }, tries: 2, signal: AbortSignal.timeout(8_000) },
   );
   const json = await response.json();
   const result = json.data?.webPixelDelete;
+  if (json.errors?.length) throw new Error(json.errors.map((error) => error.message).join(" "));
   if (result?.userErrors?.length) throw new Error(result.userErrors.map((error) => error.message).join(" "));
+  if (!result?.deletedWebPixelId) throw new Error("Shopify did not confirm pixel removal. Retry Disconnect before enabling a manual pixel.");
 }

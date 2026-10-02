@@ -6,7 +6,7 @@ import vm from "node:vm";
 const source = readFileSync(new URL("./billing.server.js", import.meta.url), "utf8");
 const disconnectSource = source.slice(
   source.indexOf("export async function disconnectShopifyBilling"),
-  source.indexOf("export async function syncShopifyBilling"),
+  source.indexOf("export function syncShopifyBilling"),
 ).replace("export ", "");
 
 test("disconnect permits revoked tokens but preserves retryable failures", async () => {

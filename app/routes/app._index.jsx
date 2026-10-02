@@ -11,22 +11,21 @@ import { deleteWebPixel, ensureWebPixel, redeemConnectionCode } from "../tagioo.
 export const loader = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
   let connection = await db.storeConnection.findUnique({ where: { shop: session.shop } });
-  if (connection && !connection.shopId) {
-    const response = await admin.graphql(`#graphql
-      query LoadShopId {
-        shop {
-          id
-        }
-      }
-    `);
-    const result = await response.json();
-    const shopId = result.data?.shop?.id || "";
-    if (shopId) connection = await db.storeConnection.update({ where: { shop: session.shop }, data: { shopId } });
-  }
   if (connection) {
     const force = new URL(request.url).searchParams.has("plan_handle");
-    await syncShopifyBilling(connection, { force }).catch(() => {});
-    connection = await db.storeConnection.findUnique({ where: { shop: session.shop } });
+    void (async () => {
+      if (!connection.shopId) {
+        const response = await admin.graphql(`#graphql
+          query LoadShopId {
+            shop { id }
+          }
+        `, { signal: AbortSignal.timeout(8_000) });
+        const result = await response.json();
+        const shopId = result.data?.shop?.id || "";
+        if (shopId) connection = await db.storeConnection.update({ where: { shop: session.shop }, data: { shopId } });
+      }
+      await syncShopifyBilling(connection, { force });
+    })().catch((error) => console.error(`[Tagioo] background billing refresh failed: ${error.message}`));
   }
   return { shop: session.shop, connection, billing: billingView(connection) };
 };
@@ -45,7 +44,10 @@ export const action = async ({ request }) => {
       await db.storeConnection.deleteMany({ where: { shop: session.shop } });
       return { ok: true, message: "Store disconnected from Tagioo.", connection: null, billing: billingView(null) };
     } catch (error) {
-      return { ok: false, error: error.message, connection: existing, billing: billingView(existing) };
+      const message = /fetch failed|no response|abort|timeout/i.test(error.message)
+        ? "Could not reach Shopify to finish disconnecting. Retry Disconnect; keep the manual pixel disabled until removal succeeds."
+        : error.message;
+      return { ok: false, error: message, connection: existing, billing: billingView(existing) };
     }
   }
 
