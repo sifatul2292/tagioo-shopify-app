@@ -14,7 +14,7 @@ export const loader = async ({ request }) => {
   let connection = await db.storeConnection.findUnique({ where: { shop: session.shop } });
   if (connection) {
     const force = new URL(request.url).searchParams.has("plan_handle");
-    void (async () => {
+    const refresh = (async () => {
       if (!connection.shopId) {
         const response = await admin.graphql(`#graphql
           query LoadShopId {
@@ -27,6 +27,11 @@ export const loader = async ({ request }) => {
       }
       await syncShopifyBilling(connection, { force });
     })().catch((error) => console.error(`[Tagioo] background billing refresh failed: ${error.message}`));
+    if (force) {
+      // Shopify's approval return must display the newly confirmed entitlement.
+      await refresh;
+      connection = await db.storeConnection.findUnique({ where: { shop: session.shop } });
+    }
   }
   return { shop: session.shop, connection, billing: billingView(connection) };
 };
