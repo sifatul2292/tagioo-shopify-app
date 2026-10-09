@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import db from "./db.server";
+import { privacyConnections } from "./privacy-routing.server";
 import { shopifyOrderId } from "./shopify-order-id";
 
 const baseUrl = String(process.env.TAGIOO_API_URL || "https://tagioo.com").replace(/\/$/, "");
@@ -82,30 +83,31 @@ export async function sendOrderToTagioo({ shop, order, topic }) {
 }
 
 export async function sendPrivacyEventToTagioo({ shop, payload, topic }) {
-  const connection = await db.storeConnection.findUnique({ where: { shop } });
-  if (!connection || connection.status !== "connected") return { skipped: true };
-
-  const body = JSON.stringify({ shop, topic, payload });
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const signature = crypto
-    .createHmac("sha256", connection.integrationToken)
-    .update(`${timestamp}.${body}`)
-    .digest("hex");
-  const response = await tagiooFetch(
-    `${baseUrl}/api/integrations/shopify/privacy?tenant=${encodeURIComponent(connection.tenantId)}`,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-tagioo-timestamp": timestamp,
-        "x-tagioo-signature": signature,
+  const connections = await privacyConnections(shop);
+  for (const connection of connections) {
+    const body = JSON.stringify({ shop, topic, payload });
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const signature = crypto
+      .createHmac("sha256", connection.integrationToken)
+      .update(`${timestamp}.${body}`)
+      .digest("hex");
+    const response = await tagiooFetch(
+      `${baseUrl}/api/integrations/shopify/privacy?tenant=${encodeURIComponent(connection.tenantId)}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-tagioo-timestamp": timestamp,
+          "x-tagioo-signature": signature,
+          "x-tagioo-privacy-token": connection.integrationToken,
+        },
+        body,
       },
-      body,
-    },
-  );
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.error || `Tagioo returned HTTP ${response.status}.`);
-  return result;
+    );
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `Tagioo returned HTTP ${response.status}.`);
+  }
+  return { accepted: true, connections: connections.length };
 }
 
 export async function ensureWebPixel(admin, settings, existingPixelId = null) {

@@ -1,4 +1,5 @@
 import db from "./db.server";
+import { privacyRouteWrite } from "./privacy-routing.server";
 import { disconnectShopifyBilling } from "./billing.server";
 import { sendOrderToTagioo } from "./tagioo.server";
 import { orderDeliveryPayload } from "./shopify-order-payload";
@@ -43,25 +44,26 @@ export async function enqueueAppUninstall(connection) {
   const { shop } = connection;
   const payload = encodeProtectedPayload(connection);
   await db.$transaction([
+    privacyRouteWrite(connection),
     db.orderDelivery.upsert({
       where: { id: `${shop}:app-uninstalled` },
       create: { id: `${shop}:app-uninstalled`, shop, topic: "APP_UNINSTALLED", payload },
       update: { payload, attempts: 0, nextAttemptAt: new Date(), lastError: null },
     }),
     db.session.deleteMany({ where: { shop } }),
-    db.orderDelivery.deleteMany({ where: { shop, topic: { not: "APP_UNINSTALLED" } } }),
+    db.orderDelivery.deleteMany({ where: { shop, topic: { notIn: ["APP_UNINSTALLED", "PRIVACY_ROUTE"] } } }),
     db.storeConnection.deleteMany({ where: { shop } }),
   ]);
 }
 
 export async function deleteQueuedOrdersForShop(shop) {
-  await db.orderDelivery.deleteMany({ where: { shop, topic: { not: "APP_UNINSTALLED" } } });
+  await db.orderDelivery.deleteMany({ where: { shop, topic: { notIn: ["APP_UNINSTALLED", "PRIVACY_ROUTE"] } } });
 }
 
 export async function deleteQueuedOrdersForCustomer(shop, payload) {
   const customerId = String(payload.customer?.id || "");
   const orderIds = new Set((payload.orders_to_redact || []).map(String));
-  const deliveries = await db.orderDelivery.findMany({ where: { shop } });
+  const deliveries = await db.orderDelivery.findMany({ where: { shop, topic: { notIn: ["APP_UNINSTALLED", "PRIVACY_ROUTE"] } } });
   const ids = deliveries.flatMap((delivery) => {
     try {
       const order = decodeProtectedPayload(delivery.payload);
@@ -82,7 +84,7 @@ export async function flushOrderDeliveries() {
   workerRunning = true;
   try {
     const deliveries = await db.orderDelivery.findMany({
-      where: { nextAttemptAt: { lte: new Date() } },
+      where: { nextAttemptAt: { lte: new Date() }, topic: { not: "PRIVACY_ROUTE" } },
       orderBy: { createdAt: "asc" },
       take: 10,
     });

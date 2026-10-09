@@ -4,6 +4,7 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import { retainPrivacyRoute } from "../privacy-routing.server";
 import { billingView, disconnectShopifyBilling, syncShopifyBilling } from "../billing.server";
 import { deleteQueuedOrdersForShop } from "../order-delivery.server";
 import { deleteWebPixel, ensureWebPixel, redeemConnectionCode } from "../tagioo.server";
@@ -38,6 +39,7 @@ export const action = async ({ request }) => {
   if (intent === "disconnect") {
     const existing = await db.storeConnection.findUnique({ where: { shop: session.shop } });
     try {
+      await retainPrivacyRoute(existing);
       await disconnectShopifyBilling(existing);
       await deleteWebPixel(admin, existing?.pixelId || null);
       await deleteQueuedOrdersForShop(session.shop);
@@ -66,6 +68,7 @@ export const action = async ({ request }) => {
     const shopResult = await shopResponse.json();
     const shopId = shopResult.data?.shop?.id || null;
     const existing = await db.storeConnection.findUnique({ where: { shop: session.shop } });
+    await retainPrivacyRoute(existing);
     const pixel = await ensureWebPixel(admin, linked, existing?.pixelId || null);
     let connection = await db.storeConnection.upsert({
       where: { shop: session.shop },
