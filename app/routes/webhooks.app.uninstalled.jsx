@@ -1,9 +1,9 @@
-import { authenticate } from "../shopify.server";
+import { authenticateCleanupWebhook } from "../cleanup-webhook.server";
 import db from "../db.server";
 import { enqueueAppUninstall } from "../order-delivery.server";
 
 export const action = async ({ request }) => {
-  const { shop, topic } = await authenticate.webhook(request);
+  const { shop, topic } = await authenticateCleanupWebhook(request, "app/uninstalled");
 
   console.log(`Received ${topic} webhook for ${shop}`);
 
