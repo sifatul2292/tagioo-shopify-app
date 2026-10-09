@@ -1,4 +1,5 @@
 import test from "node:test";
+import process from "node:process";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { authenticateCleanupWebhook } from "./cleanup-webhook.server.js";
