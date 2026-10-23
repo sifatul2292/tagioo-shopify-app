@@ -60,23 +60,41 @@ export async function fetchTagiooWorkspace(shop) {
   }
 }
 
+export function isNetworkError(error) {
+  return /fetch failed|no response available|network|timeout|aborted|ECONNRESET|ETIMEDOUT|socket/i.test(String(error?.message || ""));
+}
+
+// Right after install the first Admin API call can lose its connection while
+// Shopify issues the app's access token; one retry covers that.
+async function loadShopDetails(admin, retryDelayMs = 1_000) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const response = await admin.graphql(`#graphql
+        query TagiooWorkspaceShop {
+          shop {
+            name
+            email
+            contactEmail
+            shopOwnerName
+            billingAddress { countryCodeV2 }
+          }
+        }
+      `);
+      const result = await response.json();
+      return result.data?.shop || {};
+    } catch (error) {
+      if (attempt >= 2 || !isNetworkError(error)) throw error;
+      console.error(`[Tagioo] shop details request failed, retrying: ${error.message}`, error.cause || "");
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
+  }
+}
+
 // Creates a Free, Shopify-billed Tagioo workspace from the store's own details,
 // so the merchant never signs up on tagioo.com.
 export async function createTagiooWorkspace(admin, shop) {
   if (!appSecretUsable) throw new Error("Tagioo workspace creation is not configured yet. Use Create free Tagioo account instead.");
-  const response = await admin.graphql(`#graphql
-    query TagiooWorkspaceShop {
-      shop {
-        name
-        email
-        contactEmail
-        shopOwnerName
-        billingAddress { countryCodeV2 }
-      }
-    }
-  `);
-  const result = await response.json();
-  const info = result.data?.shop || {};
+  const info = await loadShopDetails(admin);
   return signedTagiooPost("/api/integrations/shopify/workspace", {
     shop,
     intent: "create",

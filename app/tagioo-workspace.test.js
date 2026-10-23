@@ -75,3 +75,28 @@ test("an unreachable or unconfigured Tagioo falls back to the plain account link
   ctx.appSecretUsable = false;
   assert.equal((await ctx.fetchTagiooWorkspace("review-store.myshopify.com")).available, false);
 });
+
+test("shop details retry once after a dropped connection, never after a real error", async () => {
+  const ctx = context({ setTimeout, console: { error: () => {} } });
+  vm.runInContext(`${extract("isNetworkError")}\n${extract("loadShopDetails")}`, ctx);
+  const admin = (failures, message = "Http request error, no response available: GraphQL Client: fetch failed") => {
+    let calls = 0;
+    return {
+      calls: () => calls,
+      graphql: async () => {
+        calls += 1;
+        if (calls <= failures) throw new Error(message);
+        return { json: async () => ({ data: { shop: { name: "Review Store", email: "owner@example.com" } } }) };
+      },
+    };
+  };
+  const flaky = admin(1);
+  assert.equal((await ctx.loadShopDetails(flaky, 0)).name, "Review Store");
+  assert.equal(flaky.calls(), 2);
+  const down = admin(5);
+  await assert.rejects(ctx.loadShopDetails(down, 0), /fetch failed/);
+  assert.equal(down.calls(), 2);
+  const denied = admin(1, "Access denied for shop field");
+  await assert.rejects(ctx.loadShopDetails(denied, 0), /Access denied/);
+  assert.equal(denied.calls(), 1);
+});

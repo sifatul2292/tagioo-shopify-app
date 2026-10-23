@@ -12,6 +12,7 @@ import {
   deleteWebPixel,
   ensureWebPixel,
   fetchTagiooWorkspace,
+  isNetworkError,
   redeemConnectionCode,
   tagiooAccountLinks,
   tagiooDashboardUrl,
@@ -66,7 +67,11 @@ export const action = async ({ request }) => {
       const workspace = await createTagiooWorkspace(admin, session.shop);
       return { ok: true, message: workspace.created ? "Your Tagioo workspace is ready." : "This store already has a Tagioo workspace." };
     } catch (error) {
-      return { ok: false, error: error.message, accountExists: error.code === "account_exists" };
+      console.error(`[Tagioo] workspace creation failed for ${session.shop}: ${error.message}`, error.cause || "");
+      const message = isNetworkError(error)
+        ? "Tagioo could not reach Shopify just now. Please try again in a moment."
+        : error.message;
+      return { ok: false, error: message, accountExists: error.code === "account_exists" };
     }
   }
 
@@ -158,6 +163,17 @@ export default function Index() {
     if (workspaceFetcher.data?.message) shopify.toast.show(workspaceFetcher.data.message);
   }, [workspaceFetcher.data, shopify]);
 
+  // Linking happens on tagioo.com in another tab; refresh when the merchant
+  // comes back so the workspace (and the code field) appear without a reload.
+  useEffect(() => {
+    if (connection) return undefined;
+    const refreshOnReturn = () => {
+      if (document.visibilityState === "visible" && revalidator.state === "idle") revalidator.revalidate();
+    };
+    document.addEventListener("visibilitychange", refreshOnReturn);
+    return () => document.removeEventListener("visibilitychange", refreshOnReturn);
+  }, [connection, revalidator]);
+
   // Each dashboard link works once; fetch a fresh one after it is opened.
   const refreshDashboardLink = () => setTimeout(() => revalidator.revalidate(), 1500);
   const dashboardButton = dashboardUrl ? (
@@ -233,13 +249,15 @@ export default function Index() {
               Tagioo starts on the Free plan. Paid plans are chosen and billed only in Shopify; Tagioo never asks for a card.
             </s-banner>
             {billing.enabled ? <s-link href={billing.planSelectionUrl} target="_top">View or change Shopify plan</s-link> : null}
-            <fetcher.Form method="post">
-              <s-stack direction="block" gap="base">
-                <s-text-field label="Tagioo connection code" name="connectionCode" autocomplete="off" required />
-                <s-button type="submit" variant={workspace.linked ? "primary" : "secondary"} {...(busy ? { loading: true } : {})}>Connect Tagioo</s-button>
-                {fetcher.data?.error ? <s-banner tone="critical" heading="Could not connect">{fetcher.data.error}</s-banner> : null}
-              </s-stack>
-            </fetcher.Form>
+            {workspace.linked || !workspace.available ? (
+              <fetcher.Form method="post">
+                <s-stack direction="block" gap="base">
+                  <s-text-field label="Tagioo connection code" name="connectionCode" autocomplete="off" required />
+                  <s-button type="submit" variant="primary" {...(busy ? { loading: true } : {})}>Connect Tagioo</s-button>
+                  {fetcher.data?.error ? <s-banner tone="critical" heading="Could not connect">{fetcher.data.error}</s-banner> : null}
+                </s-stack>
+              </fetcher.Form>
+            ) : null}
           </s-stack>
         )}
       </s-section>
