@@ -13,6 +13,9 @@ test("app loader renders saved state without waiting for billing", async () => {
     authenticate: { admin: async () => ({ admin: {}, session: { shop: connection.shop } }) },
     db: { storeConnection: { findUnique: async () => connection } },
     billingView: () => ({ plan: "Free" }),
+    tagiooAccountLinks: () => ({}),
+    tagiooDashboardUrl: () => "",
+    fetchTagiooWorkspace: async () => { throw new Error("connected stores must not look up the workspace"); },
     syncShopifyBilling: () => { syncing = true; return new Promise(() => {}); },
   });
   const result = await Promise.race([
@@ -32,6 +35,9 @@ test("plan approval return renders refreshed confirmed billing state", async () 
     authenticate: { admin: async () => ({ admin: {}, session: { shop: connection.shop } }) },
     db: { storeConnection: { findUnique: async () => connection } },
     billingView: value => ({ plan: value.billingPlan }),
+    tagiooAccountLinks: () => ({}),
+    tagiooDashboardUrl: () => "",
+    fetchTagiooWorkspace: async () => { throw new Error("connected stores must not look up the workspace"); },
     syncShopifyBilling: async (_, { force }) => {
       assert.equal(force, true);
       await Promise.resolve();

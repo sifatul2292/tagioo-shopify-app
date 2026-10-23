@@ -5,9 +5,99 @@ import { shopifyOrderId } from "./shopify-order-id";
 
 const baseUrl = String(process.env.TAGIOO_API_URL || "https://tagioo.com").replace(/\/$/, "");
 const requestTimeoutMs = 10_000;
+// Shared with the panel (same name there). Signs workspace calls and one-click
+// dashboard links; values under 32 characters leave both features off.
+const appSecret = String(process.env.TAGIOO_SHOPIFY_APP_SECRET || "");
+const appSecretUsable = appSecret.length >= 32;
+const dashboardLinkTtlMs = 9 * 60_000;
 
 function tagiooFetch(url, options) {
   return fetch(url, { ...options, signal: AbortSignal.timeout(requestTimeoutMs) });
+}
+
+// Tagioo marks a signup or login reached through these links as Shopify-billed,
+// so a merchant from this app is never offered off-platform payment.
+export function tagiooAccountLinks(shop) {
+  const start = `${baseUrl}/shopify/start?shop=${encodeURIComponent(shop)}`;
+  return { signupUrl: start, loginUrl: `${start}&account=existing` };
+}
+
+async function signedTagiooPost(path, body, timeoutMs = requestTimeoutMs) {
+  const raw = JSON.stringify(body);
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const signature = crypto.createHmac("sha256", appSecret).update(`${timestamp}.${raw}`).digest("hex");
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "POST",
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: {
+      "content-type": "application/json",
+      "x-tagioo-timestamp": timestamp,
+      "x-tagioo-signature": signature,
+    },
+    body: raw,
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(result.error || `Tagioo returned HTTP ${response.status}.`);
+    error.status = response.status;
+    error.code = result.code || "";
+    throw error;
+  }
+  return result;
+}
+
+// Which Tagioo workspace this store belongs to. `available: false` means the
+// link is not configured or Tagioo did not answer; the UI then falls back to
+// the plain account links.
+export async function fetchTagiooWorkspace(shop) {
+  if (!appSecretUsable) return { available: false, linked: false };
+  try {
+    const result = await signedTagiooPost("/api/integrations/shopify/workspace", { shop, intent: "status" }, 4_000);
+    return { available: true, linked: Boolean(result.linked), tenantId: result.tenantId || "", tenantName: result.tenantName || "" };
+  } catch (error) {
+    console.error(`[Tagioo] workspace lookup failed for ${shop}: ${error.message}`);
+    return { available: false, linked: false };
+  }
+}
+
+// Creates a Free, Shopify-billed Tagioo workspace from the store's own details,
+// so the merchant never signs up on tagioo.com.
+export async function createTagiooWorkspace(admin, shop) {
+  if (!appSecretUsable) throw new Error("Tagioo workspace creation is not configured yet. Use Create free Tagioo account instead.");
+  const response = await admin.graphql(`#graphql
+    query TagiooWorkspaceShop {
+      shop {
+        name
+        email
+        contactEmail
+        shopOwnerName
+        billingAddress { countryCodeV2 }
+      }
+    }
+  `);
+  const result = await response.json();
+  const info = result.data?.shop || {};
+  return signedTagiooPost("/api/integrations/shopify/workspace", {
+    shop,
+    intent: "create",
+    shopName: info.name || "",
+    email: info.email || info.contactEmail || "",
+    ownerName: info.shopOwnerName || "",
+    country: info.billingAddress?.countryCodeV2 || "",
+  });
+}
+
+// A single-use link that signs the merchant into their Tagioo workspace.
+export function tagiooDashboardUrl(shop, tenantId = "") {
+  if (!appSecretUsable) return "";
+  const payload = Buffer.from(JSON.stringify({
+    shop,
+    tenantId,
+    nonce: crypto.randomBytes(18).toString("base64url"),
+    exp: Date.now() + dashboardLinkTtlMs,
+  })).toString("base64url");
+  const signature = crypto.createHmac("sha256", appSecret).update(payload).digest("hex");
+  return `${baseUrl}/shopify/login?token=${payload}.${signature}`;
 }
 
 export async function redeemConnectionCode({ code, shop }) {

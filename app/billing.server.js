@@ -144,7 +144,7 @@ async function syncShopifyBillingState(connection, { force = false } = {}) {
   }
 }
 
-export function billingView(connection) {
+export function billingView(connection, shop = "") {
   return {
     enabled: shopifyBillingEnabled(),
     plan: connection?.billingPlan || "Free",
@@ -152,7 +152,7 @@ export function billingView(connection) {
     cycleEnd: connection?.billingCycleEnd || null,
     cancelAtEnd: Boolean(connection?.billingCancelAtEnd),
     lastError: connection?.billingLastError || "",
-    planSelectionUrl: shopifyPlanSelectionUrl(connection?.shop || ""),
+    planSelectionUrl: shopifyPlanSelectionUrl(connection?.shop || shop),
   };
 }
 
