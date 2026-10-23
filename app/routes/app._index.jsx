@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFetcher, useLoaderData, useRevalidator } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -163,16 +163,40 @@ export default function Index() {
     if (workspaceFetcher.data?.message) shopify.toast.show(workspaceFetcher.data.message);
   }, [workspaceFetcher.data, shopify]);
 
-  // Linking happens on tagioo.com in another tab; refresh when the merchant
-  // comes back so the workspace (and the code field) appear without a reload.
+  // Linking happens on tagioo.com in another tab or window. After the merchant
+  // opens one of those links, check every few seconds (and whenever this page
+  // regains focus) until the workspace appears, so no manual reload is needed.
+  const revalidatorRef = useRef(revalidator);
+  revalidatorRef.current = revalidator;
+  const [awaitingLinkSince, setAwaitingLinkSince] = useState(0);
+  const awaitLink = () => setAwaitingLinkSince(Date.now());
   useEffect(() => {
-    if (connection) return undefined;
-    const refreshOnReturn = () => {
-      if (document.visibilityState === "visible" && revalidator.state === "idle") revalidator.revalidate();
+    if (connection || workspace.linked) return undefined;
+    const refresh = () => {
+      if (revalidatorRef.current.state === "idle") revalidatorRef.current.revalidate();
     };
-    document.addEventListener("visibilitychange", refreshOnReturn);
-    return () => document.removeEventListener("visibilitychange", refreshOnReturn);
-  }, [connection, revalidator]);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener("focus", refresh);
+    const poll = awaitingLinkSince
+      ? setInterval(() => {
+        if (Date.now() - awaitingLinkSince > 15 * 60_000) setAwaitingLinkSince(0);
+        else refresh();
+      }, 4_000)
+      : null;
+    return () => {
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.removeEventListener("focus", refresh);
+      if (poll) clearInterval(poll);
+    };
+  }, [connection, workspace.linked, awaitingLinkSince]);
+  useEffect(() => {
+    if (!workspace.linked || !awaitingLinkSince) return;
+    setAwaitingLinkSince(0);
+    shopify.toast.show(`Linked to Tagioo workspace ${workspace.tenantName}`);
+  }, [workspace.linked, workspace.tenantName, awaitingLinkSince, shopify]);
 
   // Each dashboard link works once; fetch a fresh one after it is opened.
   const refreshDashboardLink = () => setTimeout(() => revalidator.revalidate(), 1500);
@@ -233,15 +257,15 @@ export default function Index() {
                   </s-banner>
                 ) : null}
                 <s-paragraph>
-                  Already use Tagioo for other websites? <s-link href={loginUrl} target="_blank">Sign in to link that account</s-link>. Its plan then moves to Shopify billing for all its sites.
+                  Already use Tagioo for other websites? <s-link href={loginUrl} target="_blank" onClick={awaitLink}>Sign in to link that account</s-link>. Its plan then moves to Shopify billing for all its sites.
                 </s-paragraph>
               </>
             ) : (
               <>
                 <s-paragraph>Tagioo hosts the server-side tracking container for this store. Create a free Tagioo account, or sign in, then add a tracking container.</s-paragraph>
                 <s-stack direction="inline" gap="base">
-                  <s-button href={signupUrl} target="_blank" variant="primary">Create free Tagioo account</s-button>
-                  <s-button href={loginUrl} target="_blank">Sign in to Tagioo</s-button>
+                  <s-button href={signupUrl} target="_blank" variant="primary" onClick={awaitLink}>Create free Tagioo account</s-button>
+                  <s-button href={loginUrl} target="_blank" onClick={awaitLink}>Sign in to Tagioo</s-button>
                 </s-stack>
               </>
             )}
