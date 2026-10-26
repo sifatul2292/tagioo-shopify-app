@@ -1,4 +1,4 @@
-# Tagioo Tracking — Shopify App Store submission
+# Tagioo Server-Side Tracking — Shopify App Store submission
 
 This is the prepared source copy for the English listing. Confirm every claim
 against the live app before submission. The legal pages are operational drafts
@@ -6,7 +6,7 @@ and should receive legal review.
 
 ## Basic information
 
-- App name: `Tagioo Tracking`
+- App name: `Tagioo Server-Side Tracking` (must match `name` in `shopify.app.toml`)
 - Primary category: `Store management > Analytics`
 - Languages: `English`
 - App icon: `docs/app-store-assets/tagioo-app-icon.png`
@@ -22,7 +22,7 @@ and should receive legal review.
 - Feature 3: `Deduplicate browser and backend purchases with matching order IDs`
 - Subtitle (62 characters max): `Server-side storefront and paid-order tracking`
 - Search terms: `analytics`, `conversion`, `tracking`, `web pixel`, `server-side`
-- SEO title (60 characters max): `Tagioo Tracking: Server-side ecommerce analytics`
+- SEO title (60 characters max): `Tagioo Server-Side Tracking for Shopify`
 - SEO description (160 characters max):
   `Send storefront and paid-order events to a Tagioo server-side tracking workspace with app-pixel events, backend recovery, and purchase deduplication.`
 
@@ -45,22 +45,22 @@ connected stores.
 
 ## Reviewer instructions
 
-1. Install Tagioo Tracking on the Shopify development store used for review.
-2. Sign in to the dedicated Tagioo reviewer account supplied in the listing.
-3. Open Setup Assistant, create a container, choose Shopify, and enter a GA4
-   Measurement ID and the assigned tracking domain.
-4. Generate the Server GTM container template and import it into a Server GTM
-   container using Merge. Do not publish the generated Web GTM browser tags for
-   this Shopify store; the app pixel sends browser events.
-5. Generate a one-time Shopify connection code in Tagioo.
-6. Open Tagioo Tracking in Shopify Admin, paste the code, and connect.
-7. Visit a product, add it to cart, and start checkout. Confirm those events in
+1. Install Tagioo Server-Side Tracking on the Shopify development store used for review.
+2. In the app, click **Sign in to link that account** and sign in with the dedicated
+   Tagioo reviewer account supplied in the listing. Return to the app tab.
+3. The app lists the reviewer workspace's containers. Click **Connect** next to the
+   prepared reviewer container. There is no connection code. The app installs its web
+   pixel and starts the paid-order webhook flow ("Tracking is connected").
+4. The prepared container already has its tracking domain and Server GTM template.
+   For a new merchant, **Finish setup** shows the CNAME record and a server container
+   template download; the app pixel replaces the Web GTM browser tags.
+5. Visit a product, add it to cart, and start checkout. Confirm those events in
    Tagioo Event Logs.
-8. Place a test paid order. Confirm one backend Purchase appears and that the
+6. Place a test paid order. Confirm one backend Purchase appears and that the
    browser and backend Purchase share the Shopify order ID for deduplication.
-9. Open `View or change Shopify plan` to inspect Free, Starter, Pro, and
+7. Open `View or change Shopify plan` to inspect Free, Starter, Pro, and
    Enterprise plans. Development stores are not charged for plan testing.
-10. Uninstall the app and confirm the store connection is removed.
+8. Uninstall the app and confirm the store connection is removed.
 
 ## Still required before submission
 

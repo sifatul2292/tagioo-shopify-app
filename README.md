@@ -1,6 +1,6 @@
-# Tagioo Tracking for Shopify
+# Tagioo Server-Side Tracking for Shopify
 
-Official Shopify app for connecting a Shopify store to an existing Tagioo server-side GTM workspace.
+Official Shopify app for connecting a Shopify store to a Tagioo server-side GTM workspace.
 
 ## What it does
 
@@ -8,7 +8,8 @@ Official Shopify app for connecting a Shopify store to an existing Tagioo server
 - Receives Shopify's signed `orders/paid` webhook, durably queues it in SQLite,
   and forwards a second, tenant-signed Purchase to Tagioo with background retries.
 - Uses the Shopify order ID for both browser and backend Purchase so downstream Meta/GA4 tags can deduplicate.
-- Keeps every store isolated with a unique integration token created from a short-lived Tagioo connection code.
+- Keeps every store isolated with a unique integration token issued when the store connects.
+- Connects with one click over a signed app-to-Tagioo channel (`TAGIOO_SHOPIFY_APP_SECRET`); there is no connection code.
 
 ## Local requirements
 
@@ -25,8 +26,8 @@ Official Shopify app for connecting a Shopify store to an existing Tagioo server
 3. Prepare the local database: `pnpm setup`.
 4. Start Shopify development mode: `pnpm dev`.
 5. Install the development app on a Shopify development store.
-6. In Tagioo Setup Assistant, select Shopify, generate the GTM templates, then generate a one-time Shopify connection code.
-7. Paste the code into the embedded Tagioo Tracking app.
+6. Open the embedded app, create or link a Tagioo workspace, then click **Connect** next to a container
+   (or add a container in the app). Set `TAGIOO_SHOPIFY_APP_SECRET` to the same value as the panel.
 
 ## Production configuration
 
@@ -79,11 +80,12 @@ pnpm shopify app deploy
 
 ## Customer flow
 
-1. Create/link the Tagioo Web and Server GTM containers.
-2. In Tagioo Setup Assistant choose **Shopify** and enter the tracking details.
-3. Generate/import `server.json` into Server GTM.
-4. Install **Tagioo Tracking** from Shopify.
-5. Generate a one-time connection code in Tagioo and paste it into the Shopify app.
-6. Place one paid test order and verify Tagioo Event Logs, GA4 DebugView/Realtime, and Meta Test Events.
+1. Install **Tagioo Server-Side Tracking** from Shopify.
+2. In the app, create a free Tagioo workspace or sign in to link an existing one.
+3. Click **Connect** next to a tracking container, or add one in the app (tracking subdomain,
+   GTM server Container Config, GA4 Measurement ID, optional Meta Pixel and CAPI token).
+4. Add the CNAME record shown in **Finish setup**, then download the server container template
+   and import it into Server GTM (Merge), and publish.
+5. Place one paid test order and verify Tagioo Event Logs, GA4 DebugView/Realtime, and Meta Test Events.
 
 The app pixel replaces the Tagioo browser tags for Shopify. Do not simultaneously publish the generated `web.json` browser event tags, because that can produce duplicate browser events.

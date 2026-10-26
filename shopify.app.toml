@@ -3,7 +3,7 @@
 client_id = "65877316e22439815de79ebfd37e3417"
 application_url = "https://connect.tagioo.com"
 embedded = true
-name = "Tagioo Tracking"
+name = "Tagioo Server-Side Tracking"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
