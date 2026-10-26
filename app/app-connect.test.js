@@ -119,3 +119,15 @@ test("pages are sent complete, so React's stream helper never writes a stray $ i
   assert.match(entry, /const callbackName = "onAllReady";/);
   assert.doesNotMatch(entry, /onShellReady/);
 });
+
+test("Finish setup only lists open steps and hides once the container is live and set up", () => {
+  assert.match(source, /const setupComplete = containerLive && Boolean\(connectedContainer\?\.setupDone\);/);
+  assert.match(source, /\{connection && connectedContainer && !setupComplete \? \(\s*<s-section heading="Finish setup">/);
+  assert.match(source, /\{connectedContainer\.setupDone \? null : \(/);
+  assert.match(source, /Setup complete: /);
+});
+
+test("a plan change gets 30 s to reach Tagioo, which may resize the container first", () => {
+  const billing = readFileSync(new URL("./billing.server.js", import.meta.url), "utf8");
+  assert.match(billing, /await sendBillingStateToTagioo\(connection, state, 30_000\);/);
+});

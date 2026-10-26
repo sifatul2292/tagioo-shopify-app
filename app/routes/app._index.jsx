@@ -296,6 +296,10 @@ export default function Index() {
   const containerStatus = statusFetcher.data?.containerStatus || null;
   const connectedContainer = containerStatus?.container || null;
   const dnsTarget = containerStatus?.dnsTarget || "";
+  // Only list setup steps that are still open: the domain is not live yet,
+  // or the server template was never generated (Setup Assistant) or downloaded.
+  const containerLive = ["live", "http_live"].includes(connectedContainer?.status);
+  const setupComplete = containerLive && Boolean(connectedContainer?.setupDone);
 
   // Hand the template to the browser as a file the merchant imports into GTM.
   useEffect(() => {
@@ -314,7 +318,9 @@ export default function Index() {
     anchor.click();
     anchor.remove();
     setTimeout(() => URL.revokeObjectURL(href), 10_000);
-  }, [templateFetcher.data, shopify]);
+    // Tagioo now counts the template step as done; reload the steps.
+    setTimeout(() => statusSubmit({ intent: "container-status" }, { method: "post" }), 1_500);
+  }, [templateFetcher.data, shopify, statusSubmit]);
 
   useEffect(() => {
     if (unlinkFetcher.data?.unlinked && revalidatorRef.current.state === "idle") revalidatorRef.current.revalidate();
@@ -341,6 +347,7 @@ export default function Index() {
             <s-paragraph><s-text>Tagioo workspace: </s-text>{connection.tenantName || connection.tenantId}</s-paragraph>
             <s-paragraph><s-text>Tracking domain: </s-text>{connection.trackingDomain}</s-paragraph>
             <s-paragraph><s-text>Measurement ID: </s-text>{connection.measurementId}</s-paragraph>
+            {setupComplete ? <s-paragraph><s-text color="subdued">Setup complete: {hostOf(connection.trackingDomain)} is live and its server container template is set up.</s-text></s-paragraph> : null}
             <s-paragraph><s-text>Last backend order: </s-text>{connection.lastOrderAt ? new Date(connection.lastOrderAt).toLocaleString() : "Waiting for the first paid order"}</s-paragraph>
             <s-banner tone={billing.plan === "Free" ? "info" : "success"} heading={`Tagioo ${billing.plan} plan`}>
               {billing.plan === "Free"
@@ -476,15 +483,15 @@ export default function Index() {
         )}
       </s-section>
 
-      {connection ? (
+      {connection && connectedContainer && !setupComplete ? (
         <s-section heading="Finish setup">
           <s-stack direction="block" gap="base">
             <s-stack direction="block" gap="small-200">
               <s-stack direction="inline" gap="small-200" alignItems="center">
                 <s-text type="strong">1. Tracking domain</s-text>
-                {connectedContainer ? containerBadge(connectedContainer.status) : statusFetcher.state !== "idle" ? <s-spinner size="base" accessibilityLabel="Loading container status" /> : null}
+                {containerBadge(connectedContainer.status)}
               </s-stack>
-              {connectedContainer?.status === "dns_pending" ? (
+              {connectedContainer.status === "dns_pending" ? (
                 <>
                   <s-paragraph>
                     At your domain provider, add a CNAME record for <s-text type="strong">{hostOf(connection.trackingDomain)}</s-text> that points to <s-text type="strong">{dnsTarget || "the target shown in your Tagioo dashboard"}</s-text>. Then check it here.
@@ -496,23 +503,27 @@ export default function Index() {
                   {dnsFetcher.data?.dnsCheck?.message ? <s-text color="subdued">{dnsFetcher.data.dnsCheck.message}</s-text> : null}
                   {dnsFetcher.data?.dnsCheck?.error ? <s-banner tone="critical" heading="Could not check DNS">{dnsFetcher.data.dnsCheck.error}</s-banner> : null}
                 </>
-              ) : connectedContainer && !containerStatusText[connectedContainer.status] ? (
+              ) : !containerLive ? (
                 <s-paragraph>Tagioo is finishing this container. If its status does not change within a few minutes, contact Tagioo support.</s-paragraph>
               ) : (
                 <s-paragraph>{hostOf(connection.trackingDomain)} receives this store&apos;s events.</s-paragraph>
               )}
             </s-stack>
-            <s-divider />
-            <s-stack direction="block" gap="small-200">
-              <s-text type="strong">2. Server container template</s-text>
-              <s-paragraph>
-                In Google Tag Manager, open your server container, choose Admin → Import container, select this file and choose Merge. Then publish the container. Skip this if you already imported Tagioo&apos;s server template from the Tagioo dashboard.
-              </s-paragraph>
-              <templateFetcher.Form method="post">
-                <input type="hidden" name="intent" value="server-template" />
-                <s-button type="submit" {...(templateFetcher.state !== "idle" ? { loading: true } : {})}>Download server container template</s-button>
-              </templateFetcher.Form>
-            </s-stack>
+            {connectedContainer.setupDone ? null : (
+              <>
+                <s-divider />
+                <s-stack direction="block" gap="small-200">
+                  <s-text type="strong">2. Server container template</s-text>
+                  <s-paragraph>
+                    In Google Tag Manager, open your server container, choose Admin → Import container, select this file and choose Merge. Then publish the container.
+                  </s-paragraph>
+                  <templateFetcher.Form method="post">
+                    <input type="hidden" name="intent" value="server-template" />
+                    <s-button type="submit" {...(templateFetcher.state !== "idle" ? { loading: true } : {})}>Download server container template</s-button>
+                  </templateFetcher.Form>
+                </s-stack>
+              </>
+            )}
           </s-stack>
         </s-section>
       ) : null}

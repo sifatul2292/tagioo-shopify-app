@@ -127,7 +127,8 @@ async function syncShopifyBillingState(connection, { force = false } = {}) {
       amount: price.amount,
       currency: price.currency,
     };
-    await sendBillingStateToTagioo(connection, state);
+    // Tagioo may resize the workspace's container before it answers a plan change.
+    await sendBillingStateToTagioo(connection, state, 30_000);
     await db.storeConnection.update({
       where: { shop: connection.shop },
       data: {
