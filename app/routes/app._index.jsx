@@ -8,12 +8,15 @@ import { retainPrivacyRoute } from "../privacy-routing.server";
 import { billingView, disconnectShopifyBilling, syncShopifyBilling } from "../billing.server";
 import { deleteQueuedOrdersForShop } from "../order-delivery.server";
 import {
+  checkTagiooDns,
+  connectTagiooContainer,
+  createTagiooContainer,
   createTagiooWorkspace,
   deleteWebPixel,
   ensureWebPixel,
+  fetchServerTemplate,
   fetchTagiooWorkspace,
   isNetworkError,
-  redeemConnectionCode,
   tagiooAccountLinks,
   tagiooDashboardUrl,
 } from "../tagioo.server";
@@ -92,59 +95,114 @@ export const action = async ({ request }) => {
     }
   }
 
-  const code = String(form.get("connectionCode") || "").trim();
-  if (!code) return { ok: false, error: "Enter the connection code from Tagioo." };
-
-  try {
-    const linked = await redeemConnectionCode({ code, shop: session.shop });
-    const shopResponse = await admin.graphql(`#graphql
-      query ConnectShopId {
-        shop {
-          id
-        }
-      }
-    `);
-    const shopResult = await shopResponse.json();
-    const shopId = shopResult.data?.shop?.id || null;
+  if (intent === "container-status") {
     const existing = await db.storeConnection.findUnique({ where: { shop: session.shop } });
-    await retainPrivacyRoute(existing);
-    const pixel = await ensureWebPixel(admin, linked, existing?.pixelId || null);
-    let connection = await db.storeConnection.upsert({
-      where: { shop: session.shop },
-      create: {
+    const workspace = await fetchTagiooWorkspace(session.shop, existing?.tenantId || "");
+    const container = (workspace.containers || []).find((item) => item.connectedShop === session.shop) || null;
+    return { containerStatus: { available: workspace.available, container, dnsTarget: workspace.dnsTarget || "" } };
+  }
+
+  if (intent === "check-dns") {
+    const existing = await db.storeConnection.findUnique({ where: { shop: session.shop } });
+    try {
+      const result = await checkTagiooDns({ shop: session.shop, tenantId: existing?.tenantId || "" });
+      const message = result.status === "live" || result.status === "http_live"
+        ? "Your tracking domain is live."
+        : result.retryAfterSeconds
+          ? `Checked a moment ago. Try again in ${result.retryAfterSeconds} seconds.`
+          : "The DNS record is not visible yet. DNS changes can take up to an hour.";
+      return { dnsCheck: { status: result.status, message } };
+    } catch (error) {
+      return { dnsCheck: { error: error.message } };
+    }
+  }
+
+  if (intent === "server-template") {
+    const existing = await db.storeConnection.findUnique({ where: { shop: session.shop } });
+    try {
+      return { serverTemplate: await fetchServerTemplate({ shop: session.shop, tenantId: existing?.tenantId || "" }) };
+    } catch (error) {
+      return { serverTemplate: { error: error.message } };
+    }
+  }
+
+  const tenantId = String(form.get("tenantId") || "");
+  try {
+    const linked = intent === "create-container"
+      ? await createTagiooContainer(admin, {
         shop: session.shop,
-        shopId,
-        tenantId: linked.tenantId,
-        tenantName: linked.tenantName || null,
-        trackingDomain: linked.trackingDomain,
-        measurementId: linked.measurementId,
-        integrationToken: linked.integrationToken,
-        pixelId: pixel.id,
-      },
-      update: {
-        shopId,
-        tenantId: linked.tenantId,
-        tenantName: linked.tenantName || null,
-        trackingDomain: linked.trackingDomain,
-        measurementId: linked.measurementId,
-        integrationToken: linked.integrationToken,
-        pixelId: pixel.id,
-        status: "connected",
-        lastError: null,
-      },
-    });
-    await syncShopifyBilling(connection, { force: true }).catch(() => {});
-    connection = await db.storeConnection.findUnique({ where: { shop: session.shop } });
+        tenantId,
+        fields: Object.fromEntries(["trackingDomain", "containerConfig", "ga4MeasurementId", "metaPixelId", "metaAccessToken"].map((key) => [key, form.get(key)])),
+      })
+      : await connectTagiooContainer({ shop: session.shop, tenantId, containerId: String(form.get("containerId") || "") });
+    const connection = await saveConnection(admin, session.shop, linked);
     return { ok: true, message: "Tagioo tracking is connected.", connection, billing: billingView(connection, session.shop) };
   } catch (error) {
-    return { ok: false, error: error.message };
+    console.error(`[Tagioo] ${intent} failed for ${session.shop}: ${error.message}`, error.cause || "");
+    const message = isNetworkError(error) ? "Tagioo could not be reached just now. Please try again in a moment." : error.message;
+    return { ok: false, error: message, failedIntent: intent };
   }
 };
+
+// Installs or updates the app pixel with the container's settings and stores
+// the connection. Tagioo has already recorded this store on the container.
+async function saveConnection(admin, shop, linked) {
+  const shopResponse = await admin.graphql(`#graphql
+    query ConnectShopId {
+      shop {
+        id
+      }
+    }
+  `);
+  const shopResult = await shopResponse.json();
+  const shopId = shopResult.data?.shop?.id || null;
+  const existing = await db.storeConnection.findUnique({ where: { shop } });
+  await retainPrivacyRoute(existing);
+  const pixel = await ensureWebPixel(admin, linked, existing?.pixelId || null);
+  const fields = {
+    shopId,
+    tenantId: linked.tenantId,
+    tenantName: linked.tenantName || null,
+    trackingDomain: linked.trackingDomain,
+    measurementId: linked.measurementId,
+    integrationToken: linked.integrationToken,
+    pixelId: pixel.id,
+  };
+  const connection = await db.storeConnection.upsert({
+    where: { shop },
+    create: { shop, ...fields },
+    update: { ...fields, status: "connected", lastError: null },
+  });
+  await syncShopifyBilling(connection, { force: true }).catch(() => {});
+  return db.storeConnection.findUnique({ where: { shop } });
+}
+
+const containerStatusText = {
+  live: ["success", "Live"],
+  http_live: ["success", "Live"],
+  dns_pending: ["warning", "Waiting for DNS"],
+  queued: ["info", "Starting"],
+  pending_launch: ["info", "Starting"],
+  launching: ["info", "Starting"],
+  worker_assigned: ["info", "Starting"],
+};
+
+function containerBadge(status) {
+  const [tone, label] = containerStatusText[status] || (status ? ["critical", "Needs attention"] : ["neutral", "Unknown"]);
+  return <s-badge tone={tone}>{label}</s-badge>;
+}
+
+function hostOf(url) {
+  return String(url || "").replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+}
 
 export default function Index() {
   const initial = useLoaderData();
   const fetcher = useFetcher();
   const workspaceFetcher = useFetcher();
+  const statusFetcher = useFetcher();
+  const dnsFetcher = useFetcher();
+  const templateFetcher = useFetcher();
   const revalidator = useRevalidator();
   const shopify = useAppBridge();
   const { workspace, dashboardUrl, signupUrl, loginUrl } = initial.tagioo;
@@ -152,7 +210,11 @@ export default function Index() {
     ? fetcher.data.connection
     : initial.connection;
   const billing = fetcher.data?.billing || initial.billing;
-  const busy = fetcher.state !== "idle";
+  const busyIntent = fetcher.state !== "idle" ? String(fetcher.formData?.get("intent") || "") : "";
+  const containers = workspace.containers || [];
+  const connectable = containers.filter((container) => container.connectable);
+  const [addingContainer, setAddingContainer] = useState(false);
+  const showContainerForm = addingContainer || connectable.length === 0;
 
   useEffect(() => {
     if (fetcher.data?.message) shopify.toast.show(fetcher.data.message);
@@ -166,12 +228,13 @@ export default function Index() {
   // Linking happens on tagioo.com in another tab or window. After the merchant
   // opens one of those links, check every few seconds (and whenever this page
   // regains focus) until the workspace appears, so no manual reload is needed.
+  // Focus also picks up a container added in the Tagioo dashboard.
   const revalidatorRef = useRef(revalidator);
   revalidatorRef.current = revalidator;
   const [awaitingLinkSince, setAwaitingLinkSince] = useState(0);
   const awaitLink = () => setAwaitingLinkSince(Date.now());
   useEffect(() => {
-    if (connection || workspace.linked) return undefined;
+    if (connection) return undefined;
     const refresh = () => {
       if (revalidatorRef.current.state === "idle") revalidatorRef.current.revalidate();
     };
@@ -180,7 +243,7 @@ export default function Index() {
     };
     document.addEventListener("visibilitychange", refreshWhenVisible);
     window.addEventListener("focus", refresh);
-    const poll = awaitingLinkSince
+    const poll = awaitingLinkSince && !workspace.linked
       ? setInterval(() => {
         if (Date.now() - awaitingLinkSince > 15 * 60_000) setAwaitingLinkSince(0);
         else refresh();
@@ -198,14 +261,49 @@ export default function Index() {
     shopify.toast.show(`Linked to Tagioo workspace ${workspace.tenantName}`);
   }, [workspace.linked, workspace.tenantName, awaitingLinkSince, shopify]);
 
+  // The connected container's launch state loads after the page, so opening
+  // the app never waits on Tagioo.
+  const statusSubmit = statusFetcher.submit;
+  const connectedShop = connection?.shop || "";
+  useEffect(() => {
+    if (connectedShop) statusSubmit({ intent: "container-status" }, { method: "post" });
+  }, [connectedShop, statusSubmit]);
+  useEffect(() => {
+    if (dnsFetcher.data?.dnsCheck) statusSubmit({ intent: "container-status" }, { method: "post" });
+  }, [dnsFetcher.data, statusSubmit]);
+  const containerStatus = statusFetcher.data?.containerStatus || null;
+  const connectedContainer = containerStatus?.container || null;
+  const dnsTarget = containerStatus?.dnsTarget || "";
+
+  // Hand the template to the browser as a file the merchant imports into GTM.
+  useEffect(() => {
+    const result = templateFetcher.data?.serverTemplate;
+    if (!result) return;
+    if (result.error) {
+      shopify.toast.show(result.error, { isError: true });
+      return;
+    }
+    const blob = new Blob([JSON.stringify(result.template, null, 2)], { type: "application/json" });
+    const href = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.download = result.fileName || "tagioo-server-template.json";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 10_000);
+  }, [templateFetcher.data, shopify]);
+
   // Each dashboard link works once; fetch a fresh one after it is opened.
   const refreshDashboardLink = () => setTimeout(() => revalidator.revalidate(), 1500);
   const dashboardButton = dashboardUrl ? (
-    <s-button href={dashboardUrl} target="_blank" variant="primary" onClick={refreshDashboardLink}>Open Tagioo dashboard</s-button>
+    <s-button href={dashboardUrl} target="_blank" variant={connection ? "primary" : "secondary"} onClick={refreshDashboardLink}>Open Tagioo dashboard</s-button>
   ) : null;
+  const connectError = fetcher.data?.error && fetcher.data.failedIntent === "connect" ? fetcher.data.error : "";
+  const createError = fetcher.data?.error && fetcher.data.failedIntent === "create-container" ? fetcher.data.error : "";
 
   return (
-    <s-page heading="Tagioo Tracking">
+    <s-page heading="Tagioo Server-Side Tracking">
       <s-section heading={connection ? "Tracking is connected" : workspace.linked ? "Connect this Shopify store" : "Set up Tagioo for this store"}>
         {connection ? (
           <s-stack direction="block" gap="base">
@@ -227,7 +325,7 @@ export default function Index() {
             {billing.enabled ? <s-link href={billing.planSelectionUrl} target="_top">View or change Shopify plan</s-link> : null}
             <fetcher.Form method="post">
               <input type="hidden" name="intent" value="disconnect" />
-              <s-button type="submit" tone="critical" variant="secondary" {...(busy ? { loading: true } : {})}>Disconnect</s-button>
+              <s-button type="submit" tone="critical" variant="secondary" {...(busyIntent === "disconnect" ? { loading: true } : {})}>Disconnect</s-button>
             </fetcher.Form>
           </s-stack>
         ) : (
@@ -235,13 +333,71 @@ export default function Index() {
             {workspace.linked ? (
               <>
                 <s-banner tone="success" heading={`Tagioo workspace: ${workspace.tenantName}`}>
-                  Next, add a tracking container in Tagioo and connect it to this store.
+                  {connectable.length
+                    ? "Choose the tracking container for this store and click Connect. Tagioo then installs the app pixel and the paid-order webhook."
+                    : "Add a tracking container for this store below. Tagioo then installs the app pixel and the paid-order webhook."}
                 </s-banner>
-                <s-ordered-list>
-                  <s-list-item>Open your Tagioo dashboard and add a tracking container.</s-list-item>
-                  <s-list-item>In Setup Assistant, choose Shopify and click <s-text>Generate connection code</s-text>.</s-list-item>
-                  <s-list-item>Paste that one-time code below.</s-list-item>
-                </s-ordered-list>
+                {containers.length ? (
+                  <s-stack direction="block" gap="small-200">
+                    {containers.map((container) => (
+                      <s-box key={container.id || "primary"} padding="base" border="base" borderRadius="base">
+                        <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
+                          <s-stack direction="block" gap="small-300">
+                            <s-text type="strong">{container.name}</s-text>
+                            <s-text color="subdued">{hostOf(container.trackingDomain) || "No tracking domain yet"}{container.measurementId ? ` · ${container.measurementId}` : ""}</s-text>
+                            {containerBadge(container.status)}
+                          </s-stack>
+                          {container.connectable ? (
+                            <fetcher.Form method="post">
+                              <input type="hidden" name="intent" value="connect" />
+                              <input type="hidden" name="tenantId" value={workspace.tenantId} />
+                              <input type="hidden" name="containerId" value={container.id} />
+                              <s-button type="submit" variant="primary" {...(busyIntent === "connect" && fetcher.formData?.get("containerId") === container.id ? { loading: true } : {})}>Connect</s-button>
+                            </fetcher.Form>
+                          ) : (
+                            <s-text color="subdued">{container.connectedShop ? `Used by ${container.connectedShop}` : "Finish its setup in the Tagioo dashboard"}</s-text>
+                          )}
+                        </s-stack>
+                      </s-box>
+                    ))}
+                  </s-stack>
+                ) : null}
+                {connectError ? <s-banner tone="critical" heading="Could not connect">{connectError}</s-banner> : null}
+                {showContainerForm ? (
+                  <fetcher.Form method="post">
+                    <input type="hidden" name="intent" value="create-container" />
+                    <input type="hidden" name="tenantId" value={workspace.tenantId} />
+                    <s-stack direction="block" gap="base">
+                      <s-heading>Add a tracking container for this store</s-heading>
+                      <s-paragraph>Tagioo hosts a Google Tag Manager server container for your store on your own subdomain, so tracking stays first-party.</s-paragraph>
+                      <s-text-field
+                        label="Tracking subdomain"
+                        name="trackingDomain"
+                        placeholder="track.yourstore.com"
+                        details="A subdomain of your store's domain. After this step you add one DNS record that points it to Tagioo."
+                        autocomplete="off"
+                        required
+                      />
+                      <s-text-area
+                        label="Server container config"
+                        name="containerConfig"
+                        rows={3}
+                        details="In Google Tag Manager, open your server container, then Admin → Container settings → Manually provision tagging server, and copy the Container Config."
+                        required
+                      />
+                      <s-text-field label="GA4 Measurement ID" name="ga4MeasurementId" placeholder="G-XXXXXXXXXX" autocomplete="off" required />
+                      <s-text-field label="Meta Pixel ID (optional)" name="metaPixelId" autocomplete="off" />
+                      <s-password-field label="Meta Conversions API access token (optional)" name="metaAccessToken" autocomplete="off" details="Needed with the Pixel ID to send events to Meta from the server." />
+                      {createError ? <s-banner tone="critical" heading="Could not add the container">{createError}</s-banner> : null}
+                      <s-stack direction="inline" gap="base">
+                        <s-button type="submit" variant="primary" {...(busyIntent === "create-container" ? { loading: true } : {})}>Add container and connect</s-button>
+                        {connectable.length ? <s-button variant="tertiary" onClick={() => setAddingContainer(false)}>Cancel</s-button> : null}
+                      </s-stack>
+                    </s-stack>
+                  </fetcher.Form>
+                ) : (
+                  <s-button variant="tertiary" onClick={() => setAddingContainer(true)}>Add a new container for this store instead</s-button>
+                )}
                 {dashboardButton}
               </>
             ) : workspace.available ? (
@@ -262,7 +418,9 @@ export default function Index() {
               </>
             ) : (
               <>
-                <s-paragraph>Tagioo hosts the server-side tracking container for this store. Create a free Tagioo account, or sign in, then add a tracking container.</s-paragraph>
+                <s-banner tone="warning" heading="Tagioo could not be reached">
+                  Reload the app in a moment. If you already have a Tagioo account, you can sign in now; this page updates when you come back.
+                </s-banner>
                 <s-stack direction="inline" gap="base">
                   <s-button href={signupUrl} target="_blank" variant="primary" onClick={awaitLink}>Create free Tagioo account</s-button>
                   <s-button href={loginUrl} target="_blank" onClick={awaitLink}>Sign in to Tagioo</s-button>
@@ -273,18 +431,50 @@ export default function Index() {
               Tagioo starts on the Free plan. Paid plans are chosen and billed only in Shopify; Tagioo never asks for a card.
             </s-banner>
             {billing.enabled ? <s-link href={billing.planSelectionUrl} target="_top">View or change Shopify plan</s-link> : null}
-            {workspace.linked || !workspace.available ? (
-              <fetcher.Form method="post">
-                <s-stack direction="block" gap="base">
-                  <s-text-field label="Tagioo connection code" name="connectionCode" autocomplete="off" required />
-                  <s-button type="submit" variant="primary" {...(busy ? { loading: true } : {})}>Connect Tagioo</s-button>
-                  {fetcher.data?.error ? <s-banner tone="critical" heading="Could not connect">{fetcher.data.error}</s-banner> : null}
-                </s-stack>
-              </fetcher.Form>
-            ) : null}
           </s-stack>
         )}
       </s-section>
+
+      {connection ? (
+        <s-section heading="Finish setup">
+          <s-stack direction="block" gap="base">
+            <s-stack direction="block" gap="small-200">
+              <s-stack direction="inline" gap="small-200" alignItems="center">
+                <s-text type="strong">1. Tracking domain</s-text>
+                {connectedContainer ? containerBadge(connectedContainer.status) : statusFetcher.state !== "idle" ? <s-spinner size="base" accessibilityLabel="Loading container status" /> : null}
+              </s-stack>
+              {connectedContainer?.status === "dns_pending" ? (
+                <>
+                  <s-paragraph>
+                    At your domain provider, add a CNAME record for <s-text type="strong">{hostOf(connection.trackingDomain)}</s-text> that points to <s-text type="strong">{dnsTarget || "the target shown in your Tagioo dashboard"}</s-text>. Then check it here.
+                  </s-paragraph>
+                  <dnsFetcher.Form method="post">
+                    <input type="hidden" name="intent" value="check-dns" />
+                    <s-button type="submit" {...(dnsFetcher.state !== "idle" ? { loading: true } : {})}>Check DNS</s-button>
+                  </dnsFetcher.Form>
+                  {dnsFetcher.data?.dnsCheck?.message ? <s-text color="subdued">{dnsFetcher.data.dnsCheck.message}</s-text> : null}
+                  {dnsFetcher.data?.dnsCheck?.error ? <s-banner tone="critical" heading="Could not check DNS">{dnsFetcher.data.dnsCheck.error}</s-banner> : null}
+                </>
+              ) : connectedContainer && !containerStatusText[connectedContainer.status] ? (
+                <s-paragraph>Tagioo is finishing this container. If its status does not change within a few minutes, contact Tagioo support.</s-paragraph>
+              ) : (
+                <s-paragraph>{hostOf(connection.trackingDomain)} receives this store&apos;s events.</s-paragraph>
+              )}
+            </s-stack>
+            <s-divider />
+            <s-stack direction="block" gap="small-200">
+              <s-text type="strong">2. Server container template</s-text>
+              <s-paragraph>
+                In Google Tag Manager, open your server container, choose Admin → Import container, select this file and choose Merge. Then publish the container. Skip this if you already imported Tagioo&apos;s server template from the Tagioo dashboard.
+              </s-paragraph>
+              <templateFetcher.Form method="post">
+                <input type="hidden" name="intent" value="server-template" />
+                <s-button type="submit" {...(templateFetcher.state !== "idle" ? { loading: true } : {})}>Download server container template</s-button>
+              </templateFetcher.Form>
+            </s-stack>
+          </s-stack>
+        </s-section>
+      ) : null}
 
       <s-section slot="aside" heading="What Tagioo installs">
         <s-unordered-list>

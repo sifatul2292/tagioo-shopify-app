@@ -10,15 +10,34 @@ const requestTimeoutMs = 10_000;
 const appSecret = String(process.env.TAGIOO_SHOPIFY_APP_SECRET || "");
 const appSecretUsable = appSecret.length >= 32;
 const dashboardLinkTtlMs = 9 * 60_000;
+// Tagioo accepts account links for up to an hour; the page refreshes them
+// whenever the merchant comes back to it.
+const accountLinkTtlMs = 50 * 60_000;
+// Creating a container may launch it right away (Docker, Nginx, SSL).
+const containerCreateTimeoutMs = 120_000;
 
 function tagiooFetch(url, options) {
   return fetch(url, { ...options, signal: AbortSignal.timeout(requestTimeoutMs) });
 }
 
+function signedAppToken(claims, ttlMs) {
+  const payload = Buffer.from(JSON.stringify({
+    ...claims,
+    nonce: crypto.randomBytes(18).toString("base64url"),
+    exp: Date.now() + ttlMs,
+  })).toString("base64url");
+  const signature = crypto.createHmac("sha256", appSecret).update(payload).digest("hex");
+  return `${payload}.${signature}`;
+}
+
 // Tagioo marks a signup or login reached through these links as Shopify-billed,
-// so a merchant from this app is never offered off-platform payment.
+// so a merchant from this app is never offered off-platform payment. The link
+// is signed, which proves to Tagioo that the merchant came from this store's
+// admin; only then can the store connect to that workspace's containers.
 export function tagiooAccountLinks(shop) {
-  const start = `${baseUrl}/shopify/start?shop=${encodeURIComponent(shop)}`;
+  const start = appSecretUsable
+    ? `${baseUrl}/shopify/start?token=${signedAppToken({ shop, purpose: "start" }, accountLinkTtlMs)}`
+    : `${baseUrl}/shopify/start?shop=${encodeURIComponent(shop)}`;
   return { signupUrl: start, loginUrl: `${start}&account=existing` };
 }
 
@@ -46,14 +65,21 @@ async function signedTagiooPost(path, body, timeoutMs = requestTimeoutMs) {
   return result;
 }
 
-// Which Tagioo workspace this store belongs to. `available: false` means the
-// link is not configured or Tagioo did not answer; the UI then falls back to
-// the plain account links.
-export async function fetchTagiooWorkspace(shop) {
+// Which Tagioo workspace this store belongs to, and that workspace's tracking
+// containers. `available: false` means the link is not configured or Tagioo
+// did not answer; the UI then falls back to the plain account links.
+export async function fetchTagiooWorkspace(shop, tenantId = "") {
   if (!appSecretUsable) return { available: false, linked: false };
   try {
-    const result = await signedTagiooPost("/api/integrations/shopify/workspace", { shop, intent: "status" }, 4_000);
-    return { available: true, linked: Boolean(result.linked), tenantId: result.tenantId || "", tenantName: result.tenantName || "" };
+    const result = await signedTagiooPost("/api/integrations/shopify/workspace", { shop, tenantId, intent: "status" }, 4_000);
+    return {
+      available: true,
+      linked: Boolean(result.linked),
+      tenantId: result.tenantId || "",
+      tenantName: result.tenantName || "",
+      containers: Array.isArray(result.containers) ? result.containers : [],
+      dnsTarget: result.dnsTarget || "",
+    };
   } catch (error) {
     console.error(`[Tagioo] workspace lookup failed for ${shop}: ${error.message}`);
     return { available: false, linked: false };
@@ -77,6 +103,7 @@ async function loadShopDetails(admin, retryDelayMs = 1_000) {
             contactEmail
             shopOwnerName
             billingAddress { countryCodeV2 }
+            primaryDomain { url }
           }
         }
       `);
@@ -108,27 +135,50 @@ export async function createTagiooWorkspace(admin, shop) {
 // A single-use link that signs the merchant into their Tagioo workspace.
 export function tagiooDashboardUrl(shop, tenantId = "") {
   if (!appSecretUsable) return "";
-  const payload = Buffer.from(JSON.stringify({
-    shop,
-    tenantId,
-    nonce: crypto.randomBytes(18).toString("base64url"),
-    exp: Date.now() + dashboardLinkTtlMs,
-  })).toString("base64url");
-  const signature = crypto.createHmac("sha256", appSecret).update(payload).digest("hex");
-  return `${baseUrl}/shopify/login?token=${payload}.${signature}`;
+  return `${baseUrl}/shopify/login?token=${signedAppToken({ shop, tenantId }, dashboardLinkTtlMs)}`;
 }
 
-export async function redeemConnectionCode({ code, shop }) {
-  const response = await tagiooFetch(`${baseUrl}/api/integrations/shopify/connect`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ code: String(code || "").trim(), shop }),
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(result.error || result.errors?.[0] || "Tagioo could not connect this store.");
-  }
-  return result;
+function requireAppLink() {
+  if (!appSecretUsable) throw new Error("The Tagioo app link is not configured yet. Contact Tagioo support.");
+}
+
+// One-click connect: Tagioo checks that this store is linked to the workspace
+// and that no other store uses the container, then returns the tracking
+// settings for the app pixel. No connection code is involved.
+export async function connectTagiooContainer({ shop, tenantId, containerId }) {
+  requireAppLink();
+  return signedTagiooPost("/api/integrations/shopify/workspace", { shop, intent: "connect", tenantId, containerId: containerId || "" });
+}
+
+// Creates a tracking container for this store from inside Shopify admin and
+// connects the store to it. The website comes from the store's primary domain.
+export async function createTagiooContainer(admin, { shop, tenantId, fields }) {
+  requireAppLink();
+  const info = await loadShopDetails(admin);
+  return signedTagiooPost("/api/integrations/shopify/workspace", {
+    shop,
+    tenantId,
+    intent: "create-container",
+    shopName: info.name || "",
+    websiteUrl: info.primaryDomain?.url || `https://${shop}`,
+    trackingDomain: String(fields.trackingDomain || "").trim().replace(/^https?:\/\//i, "").replace(/\/.*$/, "").toLowerCase(),
+    containerConfig: String(fields.containerConfig || "").trim(),
+    ga4MeasurementId: String(fields.ga4MeasurementId || "").trim(),
+    metaPixelId: String(fields.metaPixelId || "").trim(),
+    metaAccessToken: String(fields.metaAccessToken || "").trim(),
+  }, containerCreateTimeoutMs);
+}
+
+// Retries launching the store's container once its DNS record is in place.
+export async function checkTagiooDns({ shop, tenantId }) {
+  requireAppLink();
+  return signedTagiooPost("/api/integrations/shopify/workspace", { shop, intent: "check-dns", tenantId }, 90_000);
+}
+
+// The server GTM container template for this store's Tagioo container.
+export async function fetchServerTemplate({ shop, tenantId }) {
+  requireAppLink();
+  return signedTagiooPost("/api/integrations/shopify/workspace", { shop, intent: "server-template", tenantId });
 }
 
 export async function sendOrderToTagioo({ shop, order, topic }) {

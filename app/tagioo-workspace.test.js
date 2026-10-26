@@ -21,13 +21,15 @@ function context(extra = {}) {
     baseUrl: "https://tagioo.example",
     requestTimeoutMs: 10_000,
     dashboardLinkTtlMs: 9 * 60_000,
+    accountLinkTtlMs: 50 * 60_000,
+    containerCreateTimeoutMs: 120_000,
     ...extra,
   });
 }
 
 test("dashboard link carries a signed, short-lived, single-use claim for the store", () => {
   const ctx = context();
-  vm.runInContext(extract("tagiooDashboardUrl"), ctx);
+  vm.runInContext(`${extract("signedAppToken")}\n${extract("tagiooDashboardUrl")}`, ctx);
   const before = Date.now();
   const url = new URL(ctx.tagiooDashboardUrl("review-store.myshopify.com", "review"));
   assert.equal(url.origin + url.pathname, "https://tagioo.example/shopify/login");
@@ -43,7 +45,7 @@ test("dashboard link carries a signed, short-lived, single-use claim for the sto
 
 test("no dashboard link without a usable shared secret", () => {
   const ctx = context({ appSecretUsable: false });
-  vm.runInContext(extract("tagiooDashboardUrl"), ctx);
+  vm.runInContext(`${extract("signedAppToken")}\n${extract("tagiooDashboardUrl")}`, ctx);
   assert.equal(ctx.tagiooDashboardUrl("review-store.myshopify.com"), "");
 });
 
@@ -99,4 +101,70 @@ test("shop details retry once after a dropped connection, never after a real err
   const denied = admin(1, "Access denied for shop field");
   await assert.rejects(ctx.loadShopDetails(denied, 0), /Access denied/);
   assert.equal(denied.calls(), 1);
+});
+
+test("account links are signed start links that cannot sign anyone in", () => {
+  const ctx = context();
+  vm.runInContext(`${extract("signedAppToken")}\n${extract("tagiooAccountLinks")}`, ctx);
+  const before = Date.now();
+  const { signupUrl, loginUrl } = ctx.tagiooAccountLinks("review-store.myshopify.com");
+  const signup = new URL(signupUrl);
+  assert.equal(signup.origin + signup.pathname, "https://tagioo.example/shopify/start");
+  assert.equal(signup.searchParams.has("shop"), false);
+  const [payload, signature] = signup.searchParams.get("token").split(".");
+  assert.equal(signature, crypto.createHmac("sha256", secret).update(payload).digest("hex"));
+  const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  assert.equal(claims.shop, "review-store.myshopify.com");
+  assert.equal(claims.purpose, "start");
+  assert.equal(claims.tenantId, undefined);
+  // Tagioo accepts start links for up to an hour.
+  assert.ok(claims.exp > before && claims.exp <= Date.now() + 50 * 60_000);
+  assert.equal(new URL(loginUrl).searchParams.get("account"), "existing");
+
+  const unsigned = context({ appSecretUsable: false });
+  vm.runInContext(`${extract("signedAppToken")}\n${extract("tagiooAccountLinks")}`, unsigned);
+  assert.equal(unsigned.tagiooAccountLinks("review-store.myshopify.com").signupUrl, "https://tagioo.example/shopify/start?shop=review-store.myshopify.com");
+});
+
+test("workspace status passes the containers through", async () => {
+  let sent;
+  const ctx = context({
+    signedTagiooPost: async (path, body) => {
+      sent = body;
+      return { linked: true, tenantId: "review", tenantName: "Review", containers: [{ id: "setup_a", connectable: true }], dnsTarget: "bd.tagioo.example" };
+    },
+  });
+  vm.runInContext(extract("fetchTagiooWorkspace"), ctx);
+  const workspace = await ctx.fetchTagiooWorkspace("review-store.myshopify.com", "review");
+  assert.deepEqual({ ...sent }, { shop: "review-store.myshopify.com", tenantId: "review", intent: "status" });
+  assert.equal(workspace.containers[0].id, "setup_a");
+  assert.equal(workspace.dnsTarget, "bd.tagioo.example");
+});
+
+test("connect and create-container are signed calls with no connection code", async () => {
+  const calls = [];
+  const ctx = context({
+    signedTagiooPost: async (path, body, timeoutMs) => { calls.push({ path, body, timeoutMs }); return { tenantId: "review" }; },
+    loadShopDetails: async () => ({ name: "Review Store", primaryDomain: { url: "https://review.example" } }),
+  });
+  vm.runInContext([extract("requireAppLink"), extract("connectTagiooContainer"), extract("createTagiooContainer")].join("\n"), ctx);
+  await ctx.connectTagiooContainer({ shop: "review-store.myshopify.com", tenantId: "review", containerId: "setup_a" });
+  assert.deepEqual({ ...calls[0].body }, { shop: "review-store.myshopify.com", intent: "connect", tenantId: "review", containerId: "setup_a" });
+  await ctx.createTagiooContainer({}, {
+    shop: "review-store.myshopify.com",
+    tenantId: "review",
+    fields: { trackingDomain: " https://Track.Review.example/ ", containerConfig: " cfg ", ga4MeasurementId: "G-1", metaPixelId: "", metaAccessToken: "" },
+  });
+  const create = calls[1];
+  assert.equal(create.path, "/api/integrations/shopify/workspace");
+  assert.equal(create.timeoutMs, 120_000);
+  assert.equal(create.body.intent, "create-container");
+  assert.equal(create.body.trackingDomain, "track.review.example");
+  assert.equal(create.body.containerConfig, "cfg");
+  assert.equal(create.body.websiteUrl, "https://review.example");
+  assert.equal(create.body.shopName, "Review Store");
+  assert.ok(calls.every((call) => !("code" in call.body)));
+
+  ctx.appSecretUsable = false;
+  await assert.rejects(ctx.connectTagiooContainer({ shop: "review-store.myshopify.com" }), /not configured/);
 });
