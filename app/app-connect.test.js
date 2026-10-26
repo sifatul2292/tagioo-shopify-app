@@ -109,4 +109,7 @@ test("the container form is hidden at the plan's container limit, with an upgrad
   assert.match(source, /heading="Container limit reached"/);
   assert.match(source, /choose a larger plan in Shopify/);
   assert.match(source, /Use a different Tagioo account/);
+  // A container serving another website gets no Connect button, only a note.
+  assert.match(source, /`Set up for your \$\{container\.otherSiteLabel\} site`/);
+  assert.match(source, /\{container\.connectable \? \(/);
 });

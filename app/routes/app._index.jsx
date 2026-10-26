@@ -382,7 +382,9 @@ export default function Index() {
                               <s-button type="submit" variant="primary" {...(busyIntent === "connect" && fetcher.formData?.get("containerId") === container.id ? { loading: true } : {})}>Connect</s-button>
                             </fetcher.Form>
                           ) : (
-                            <s-text color="subdued">{container.connectedShop ? `Used by ${container.connectedShop}` : "Finish its setup in the Tagioo dashboard"}</s-text>
+                            <s-text color="subdued">{container.otherSiteLabel
+                              ? `Set up for your ${container.otherSiteLabel} site`
+                              : container.connectedShop ? `Used by ${container.connectedShop}` : "Finish its setup in the Tagioo dashboard"}</s-text>
                           )}
                         </s-stack>
                       </s-box>
