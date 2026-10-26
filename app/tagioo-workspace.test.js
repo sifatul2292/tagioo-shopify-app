@@ -128,15 +128,18 @@ test("account links are signed start links that cannot sign anyone in", () => {
 
 test("workspace status passes the containers through", async () => {
   let sent;
+  let sentTimeout;
   const ctx = context({
-    signedTagiooPost: async (path, body) => {
+    signedTagiooPost: async (path, body, timeoutMs) => {
       sent = body;
+      sentTimeout = timeoutMs;
       return { linked: true, tenantId: "review", tenantName: "Review", containers: [{ id: "setup_a", connectable: true }], dnsTarget: "bd.tagioo.example" };
     },
   });
   vm.runInContext(extract("fetchTagiooWorkspace"), ctx);
   const workspace = await ctx.fetchTagiooWorkspace("review-store.myshopify.com", "review");
   assert.deepEqual({ ...sent }, { shop: "review-store.myshopify.com", tenantId: "review", intent: "status" });
+  assert.equal(sentTimeout, 9_000);
   assert.equal(workspace.containers[0].id, "setup_a");
   assert.equal(workspace.dnsTarget, "bd.tagioo.example");
 });

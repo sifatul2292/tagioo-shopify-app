@@ -71,7 +71,9 @@ async function signedTagiooPost(path, body, timeoutMs = requestTimeoutMs) {
 export async function fetchTagiooWorkspace(shop, tenantId = "") {
   if (!appSecretUsable) return { available: false, linked: false };
   try {
-    const result = await signedTagiooPost("/api/integrations/shopify/workspace", { shop, tenantId, intent: "status" }, 4_000);
+    // Tagioo can pause for a few seconds while it rebuilds its owner
+    // dashboard; 4 s was too tight and showed "Tagioo could not be reached".
+    const result = await signedTagiooPost("/api/integrations/shopify/workspace", { shop, tenantId, intent: "status" }, 9_000);
     return {
       available: true,
       linked: Boolean(result.linked),
