@@ -113,3 +113,9 @@ test("the container form is hidden at the plan's container limit, with an upgrad
   assert.match(source, /`Set up for your \$\{container\.otherSiteLabel\} site`/);
   assert.match(source, /\{container\.connectable \? \(/);
 });
+
+test("pages are sent complete, so React's stream helper never writes a stray $ into the page", () => {
+  const entry = readFileSync(new URL("./entry.server.jsx", import.meta.url), "utf8");
+  assert.match(entry, /const callbackName = "onAllReady";/);
+  assert.doesNotMatch(entry, /onShellReady/);
+});

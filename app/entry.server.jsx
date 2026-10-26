@@ -2,7 +2,6 @@ import { PassThrough } from "stream";
 import { renderToPipeableStream } from "react-dom/server";
 import { ServerRouter } from "react-router";
 import { createReadableStreamFromReadable } from "@react-router/node";
-import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
 
 export const streamTimeout = 5000;
@@ -14,8 +13,10 @@ export default async function handleRequest(
   reactRouterContext,
 ) {
   addDocumentResponseHeaders(request, responseHeaders);
-  const userAgent = request.headers.get("user-agent");
-  const callbackName = isbot(userAgent ?? "") ? "onAllReady" : "onShellReady";
+  // Send every page complete. When the shell streamed first, React Router's
+  // stream boundary arrived after </html>; React's $RC helper then wrote "$"
+  // into the node before it, which showed as a stray "$" under the app.
+  const callbackName = "onAllReady";
 
   return new Promise((resolve, reject) => {
     const { pipe, abort } = renderToPipeableStream(
