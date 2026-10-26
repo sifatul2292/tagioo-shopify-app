@@ -19,6 +19,7 @@ import {
   isNetworkError,
   tagiooAccountLinks,
   tagiooDashboardUrl,
+  unlinkTagiooWorkspace,
 } from "../tagioo.server";
 
 export const loader = async ({ request }) => {
@@ -80,18 +81,30 @@ export const action = async ({ request }) => {
 
   if (intent === "disconnect") {
     const existing = await db.storeConnection.findUnique({ where: { shop: session.shop } });
+    let service = "Tagioo";
     try {
       await retainPrivacyRoute(existing);
       await disconnectShopifyBilling(existing);
+      service = "Shopify";
       await deleteWebPixel(admin, existing?.pixelId || null);
       await deleteQueuedOrdersForShop(session.shop);
       await db.storeConnection.deleteMany({ where: { shop: session.shop } });
       return { ok: true, message: "Store disconnected from Tagioo.", connection: null, billing: billingView(null, session.shop) };
     } catch (error) {
-      const message = /fetch failed|no response|abort|timeout/i.test(error.message)
-        ? "Could not reach Shopify to finish disconnecting. Retry Disconnect; keep the manual pixel disabled until removal succeeds."
+      console.error(`[Tagioo] disconnect failed at ${service} for ${session.shop}: ${error.message}`, error.cause || "");
+      const message = /fetch failed|no response|abort|timeout|network/i.test(error.message)
+        ? `${service} did not answer in time, so the store is still connected. Click Disconnect again.`
         : error.message;
       return { ok: false, error: message, connection: existing, billing: billingView(existing, session.shop) };
+    }
+  }
+
+  if (intent === "unlink") {
+    try {
+      await unlinkTagiooWorkspace({ shop: session.shop, tenantId: String(form.get("tenantId") || "") });
+      return { unlinked: true, message: "This store no longer uses that Tagioo workspace." };
+    } catch (error) {
+      return { unlinked: false, error: isNetworkError(error) ? "Tagioo could not be reached just now. Please try again in a moment." : error.message };
     }
   }
 
@@ -203,6 +216,7 @@ export default function Index() {
   const statusFetcher = useFetcher();
   const dnsFetcher = useFetcher();
   const templateFetcher = useFetcher();
+  const unlinkFetcher = useFetcher();
   const revalidator = useRevalidator();
   const shopify = useAppBridge();
   const { workspace, dashboardUrl, signupUrl, loginUrl } = initial.tagioo;
@@ -214,7 +228,10 @@ export default function Index() {
   const containers = workspace.containers || [];
   const connectable = containers.filter((container) => container.connectable);
   const [addingContainer, setAddingContainer] = useState(false);
-  const showContainerForm = addingContainer || connectable.length === 0;
+  // The plan decides how many containers a workspace may have (Free and
+  // Starter: one). At the limit the form is replaced by an upgrade note.
+  const canAddContainer = workspace.canAddContainer !== false;
+  const showContainerForm = canAddContainer && (addingContainer || connectable.length === 0);
 
   useEffect(() => {
     if (fetcher.data?.message) shopify.toast.show(fetcher.data.message);
@@ -224,6 +241,11 @@ export default function Index() {
   useEffect(() => {
     if (workspaceFetcher.data?.message) shopify.toast.show(workspaceFetcher.data.message);
   }, [workspaceFetcher.data, shopify]);
+
+  useEffect(() => {
+    if (unlinkFetcher.data?.message) shopify.toast.show(unlinkFetcher.data.message);
+    if (unlinkFetcher.data?.error) shopify.toast.show(unlinkFetcher.data.error, { isError: true });
+  }, [unlinkFetcher.data, shopify]);
 
   // Linking happens on tagioo.com in another tab or window. After the merchant
   // opens one of those links, check every few seconds (and whenever this page
@@ -294,6 +316,10 @@ export default function Index() {
     setTimeout(() => URL.revokeObjectURL(href), 10_000);
   }, [templateFetcher.data, shopify]);
 
+  useEffect(() => {
+    if (unlinkFetcher.data?.unlinked && revalidatorRef.current.state === "idle") revalidatorRef.current.revalidate();
+  }, [unlinkFetcher.data]);
+
   // Each dashboard link works once; fetch a fresh one after it is opened.
   const refreshDashboardLink = () => setTimeout(() => revalidator.revalidate(), 1500);
   const dashboardButton = dashboardUrl ? (
@@ -327,6 +353,7 @@ export default function Index() {
               <input type="hidden" name="intent" value="disconnect" />
               <s-button type="submit" tone="critical" variant="secondary" {...(busyIntent === "disconnect" ? { loading: true } : {})}>Disconnect</s-button>
             </fetcher.Form>
+            <s-text color="subdued">To use a different Tagioo account, disconnect this store first, then choose Use a different Tagioo account.</s-text>
           </s-stack>
         ) : (
           <s-stack direction="block" gap="base">
@@ -395,10 +422,22 @@ export default function Index() {
                       </s-stack>
                     </s-stack>
                   </fetcher.Form>
-                ) : (
+                ) : canAddContainer ? (
                   <s-button variant="tertiary" onClick={() => setAddingContainer(true)}>Add a new container for this store instead</s-button>
+                ) : (
+                  <s-banner tone={connectable.length ? "info" : "warning"} heading="Container limit reached">
+                    Your Tagioo {workspace.plan || "current"} plan includes {workspace.containerLimit} {workspace.containerLimit === 1 ? "container" : "containers"}, and this workspace already uses {workspace.containersUsed}. To add a container for this store, choose a larger plan in Shopify.
+                    {billing.enabled ? <> <s-link href={billing.planSelectionUrl} target="_top">View or change Shopify plan</s-link></> : null}
+                  </s-banner>
                 )}
                 {dashboardButton}
+                <unlinkFetcher.Form method="post">
+                  <input type="hidden" name="intent" value="unlink" />
+                  <input type="hidden" name="tenantId" value={workspace.tenantId} />
+                  <s-paragraph>
+                    Wrong workspace? <s-button type="submit" variant="tertiary" {...(unlinkFetcher.state !== "idle" ? { loading: true } : {})}>Use a different Tagioo account</s-button>
+                  </s-paragraph>
+                </unlinkFetcher.Form>
               </>
             ) : workspace.available ? (
               <>

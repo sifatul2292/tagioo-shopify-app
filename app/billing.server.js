@@ -19,7 +19,7 @@ function subscriptionAmount(subscription) {
   return { amount: Number(price?.amount || 0), currency: price?.currency || "USD" };
 }
 
-async function sendBillingStateToTagioo(connection, state) {
+async function sendBillingStateToTagioo(connection, state, timeoutMs = 10_000) {
   const body = JSON.stringify({ shop: connection.shop, ...state });
   const timestamp = String(Math.floor(Date.now() / 1000));
   const signature = crypto
@@ -30,7 +30,7 @@ async function sendBillingStateToTagioo(connection, state) {
     `${baseUrl}/api/integrations/shopify/subscription?tenant=${encodeURIComponent(connection.tenantId)}`,
     {
       method: "POST",
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(timeoutMs),
       headers: {
         "content-type": "application/json",
         "x-tagioo-timestamp": timestamp,
@@ -47,26 +47,33 @@ async function sendBillingStateToTagioo(connection, state) {
   }
 }
 
-export async function disconnectShopifyBilling(connection) {
+const disconnectState = {
+  plan: "Free",
+  status: "disconnected",
+  billingPeriod: "",
+  cycleStart: "",
+  cycleEnd: "",
+  cancelAtEndOfCycle: false,
+  amount: 0,
+  currency: "USD",
+};
+
+// Tagioo may resize the workspace's container before it answers, so the
+// disconnect call gets more time than a billing refresh and one retry.
+export async function disconnectShopifyBilling(connection, { retryDelayMs = 1_000 } = {}) {
   if (!connection || !shopifyBillingEnabled()) return { skipped: true };
-  try {
-    await sendBillingStateToTagioo(connection, {
-      plan: "Free",
-      status: "disconnected",
-      billingPeriod: "",
-      cycleStart: "",
-      cycleEnd: "",
-      cancelAtEndOfCycle: false,
-      amount: 0,
-      currency: "USD",
-    });
-  } catch (error) {
-    // A revoked connection cannot change remote billing, but must not prevent
-    // removal of the local pixel/connection (including uninstall retries).
-    if (error.status === 401) return { disconnected: true, staleAuthorization: true };
-    throw error;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await sendBillingStateToTagioo(connection, disconnectState, 30_000);
+      return { disconnected: true };
+    } catch (error) {
+      // A revoked connection cannot change remote billing, but must not prevent
+      // removal of the local pixel/connection (including uninstall retries).
+      if (error.status === 401) return { disconnected: true, staleAuthorization: true };
+      if (attempt >= 2 || error.status) throw error;
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
   }
-  return { disconnected: true };
 }
 
 export function syncShopifyBilling(connection, options = {}) {

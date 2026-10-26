@@ -78,6 +78,10 @@ export async function fetchTagiooWorkspace(shop, tenantId = "") {
       tenantId: result.tenantId || "",
       tenantName: result.tenantName || "",
       containers: Array.isArray(result.containers) ? result.containers : [],
+      plan: result.plan || "",
+      containerLimit: Number(result.containerLimit || 0),
+      containersUsed: Number(result.containersUsed || 0),
+      canAddContainer: result.canAddContainer !== false,
       dnsTarget: result.dnsTarget || "",
     };
   } catch (error) {
@@ -167,6 +171,13 @@ export async function createTagiooContainer(admin, { shop, tenantId, fields }) {
     metaPixelId: String(fields.metaPixelId || "").trim(),
     metaAccessToken: String(fields.metaAccessToken || "").trim(),
   }, containerCreateTimeoutMs);
+}
+
+// "Use a different Tagioo account": this store stops using the workspace it
+// is linked to. Tagioo refuses while the store is connected to a container.
+export async function unlinkTagiooWorkspace({ shop, tenantId }) {
+  requireAppLink();
+  return signedTagiooPost("/api/integrations/shopify/workspace", { shop, intent: "unlink", tenantId });
 }
 
 // Retries launching the store's container once its DNS record is in place.

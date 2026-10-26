@@ -8,7 +8,7 @@ const actionSource = source.slice(source.indexOf("export const action"), source.
 const saveSource = source.slice(source.indexOf("async function saveConnection"), source.indexOf("const containerStatusText"));
 
 function harness({ connect, create } = {}) {
-  const calls = { connect: [], create: [], pixel: [], upsert: [] };
+  const calls = { connect: [], create: [], pixel: [], upsert: [], unlink: [], failDisconnect: false };
   const rows = new Map();
   const linked = { tenantId: "review", tenantName: "Review", trackingDomain: "https://review-track.tagioo.example", measurementId: "G-REVIEW", integrationToken: "t".repeat(64) };
   const ctx = vm.createContext({
@@ -19,6 +19,7 @@ function harness({ connect, create } = {}) {
     }) },
     db: { storeConnection: {
       findUnique: async ({ where }) => rows.get(where.shop) || null,
+      deleteMany: async ({ where }) => { rows.delete(where.shop); },
       upsert: async ({ where, create: created, update }) => {
         calls.upsert.push({ created, update });
         const row = { ...(rows.get(where.shop) || created), ...update };
@@ -33,6 +34,10 @@ function harness({ connect, create } = {}) {
     connectTagiooContainer: connect || (async (input) => { calls.connect.push(input); return linked; }),
     createTagiooContainer: create || (async (_admin, input) => { calls.create.push(input); return linked; }),
     isNetworkError: (error) => /fetch failed/.test(error.message),
+    unlinkTagiooWorkspace: async (input) => { calls.unlink.push(input); if (input.tenantId === "connected") throw new Error("Disconnect this store from its Tagioo container first, then choose a different account."); return { unlinked: true }; },
+    disconnectShopifyBilling: async () => { if (calls.failDisconnect) throw new Error("The operation was aborted due to timeout"); },
+    deleteWebPixel: async () => {},
+    deleteQueuedOrdersForShop: async () => {},
   });
   const action = vm.runInContext(`${actionSource}\n${saveSource}\n;action`, ctx);
   const run = (fields) => {
@@ -73,4 +78,35 @@ test("failures say which step failed and never mention a connection code", async
   const offline = harness({ create: async () => { throw new Error("fetch failed"); } });
   assert.match((await offline.run({ intent: "create-container" })).error, /could not be reached/);
   assert.doesNotMatch(source, /connectionCode|connection code/i);
+});
+
+test("Use a different Tagioo account unlinks the workspace and reports a refusal", async () => {
+  const { run, calls } = harness();
+  const done = await run({ intent: "unlink", tenantId: "review" });
+  assert.equal(done.unlinked, true);
+  assert.deepEqual({ ...calls.unlink[0] }, { shop: "reviewer.myshopify.com", tenantId: "review" });
+  const refused = await run({ intent: "unlink", tenantId: "connected" });
+  assert.equal(refused.unlinked, false);
+  assert.match(refused.error, /Disconnect this store/);
+});
+
+test("a timed-out disconnect names Tagioo, not Shopify, and keeps the store connected", async () => {
+  const { run, calls } = harness();
+  await run({ intent: "connect", tenantId: "review", containerId: "setup_a" });
+  calls.failDisconnect = true;
+  const failed = await run({ intent: "disconnect" });
+  assert.equal(failed.ok, false);
+  assert.match(failed.error, /^Tagioo did not answer in time, so the store is still connected\. Click Disconnect again\.$/);
+  assert.equal(failed.connection.tenantId, "review");
+  calls.failDisconnect = false;
+  const ok = await run({ intent: "disconnect" });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.connection, null);
+});
+
+test("the container form is hidden at the plan's container limit, with an upgrade note", () => {
+  assert.match(source, /const showContainerForm = canAddContainer && \(addingContainer \|\| connectable\.length === 0\);/);
+  assert.match(source, /heading="Container limit reached"/);
+  assert.match(source, /choose a larger plan in Shopify/);
+  assert.match(source, /Use a different Tagioo account/);
 });
