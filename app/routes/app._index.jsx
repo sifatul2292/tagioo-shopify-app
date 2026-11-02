@@ -299,6 +299,10 @@ export default function Index() {
   // Only list setup steps that are still open: the domain is not live yet,
   // or the server template was never generated (Setup Assistant) or downloaded.
   const containerLive = ["live", "http_live"].includes(connectedContainer?.status);
+  // Tagioo answered but lists no container for this store: it is connected to
+  // tracking settings without a real container (or one that is gone), so its
+  // events and purchases never reach the workspace's Event Logs.
+  const containerMissing = Boolean(containerStatus?.available) && !connectedContainer;
   const setupComplete = containerLive && Boolean(connectedContainer?.setupDone);
 
   // Hand the template to the browser as a file the merchant imports into GTM.
@@ -339,9 +343,15 @@ export default function Index() {
       <s-section heading={connection ? "Tracking is connected" : workspace.linked ? "Connect this Shopify store" : "Set up Tagioo for this store"}>
         {connection ? (
           <s-stack direction="block" gap="base">
-            <s-banner tone="success" heading="Browser and backend Purchase tracking are active">
-              Shopify customer events are sent through your Tagioo server container. Paid orders are also sent from Shopify&apos;s backend for reliable conversion recovery.
-            </s-banner>
+            {containerMissing ? (
+              <s-banner tone="critical" heading="This store has no Tagioo container">
+                Its tracking settings do not belong to a container in your Tagioo workspace, so its events and purchases cannot appear in your Event Logs. Disconnect, then add a tracking container for this store.
+              </s-banner>
+            ) : (
+              <s-banner tone="success" heading="Browser and backend Purchase tracking are active">
+                Shopify customer events are sent through your Tagioo server container. Paid orders are also sent from Shopify&apos;s backend for reliable conversion recovery.
+              </s-banner>
+            )}
             {dashboardButton}
             <s-paragraph><s-text>Store: </s-text>{initial.shop}</s-paragraph>
             <s-paragraph><s-text>Tagioo workspace: </s-text>{connection.tenantName || connection.tenantId}</s-paragraph>

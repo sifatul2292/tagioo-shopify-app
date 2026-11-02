@@ -131,3 +131,8 @@ test("a plan change gets 30 s to reach Tagioo, which may resize the container fi
   const billing = readFileSync(new URL("./billing.server.js", import.meta.url), "utf8");
   assert.match(billing, /await sendBillingStateToTagioo\(connection, state, 30_000\);/);
 });
+
+test("a store connected without a real Tagioo container is told so instead of 'tracking is active'", () => {
+  assert.match(source, /const containerMissing = Boolean\(containerStatus\?\.available\) && !connectedContainer;/);
+  assert.match(source, /heading="This store has no Tagioo container"/);
+});
