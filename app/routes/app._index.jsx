@@ -17,6 +17,7 @@ import {
   fetchServerTemplate,
   fetchTagiooWorkspace,
   isNetworkError,
+  releaseStoreInTagioo,
   tagiooAccountLinks,
   tagiooDashboardUrl,
   unlinkTagiooWorkspace,
@@ -85,6 +86,7 @@ export const action = async ({ request }) => {
     try {
       await retainPrivacyRoute(existing);
       await disconnectShopifyBilling(existing);
+      await releaseStoreInTagioo({ shop: session.shop, before: new Date().toISOString() });
       service = "Shopify";
       await deleteWebPixel(admin, existing?.pixelId || null);
       await deleteQueuedOrdersForShop(session.shop);

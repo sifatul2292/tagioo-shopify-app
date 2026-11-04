@@ -1,7 +1,7 @@
 import db from "./db.server";
 import { privacyRouteWrite } from "./privacy-routing.server";
 import { disconnectShopifyBilling } from "./billing.server";
-import { sendOrderToTagioo } from "./tagioo.server";
+import { releaseStoreInTagioo, sendOrderToTagioo } from "./tagioo.server";
 import { orderDeliveryPayload } from "./shopify-order-payload";
 import { decodeProtectedPayload, encodeProtectedPayload } from "./protected-payload";
 
@@ -42,7 +42,7 @@ export async function enqueueOrderDelivery({ shop, order, topic }) {
 export async function enqueueAppUninstall(connection) {
   if (!connection) return;
   const { shop } = connection;
-  const payload = encodeProtectedPayload(connection);
+  const payload = encodeProtectedPayload({ ...connection, uninstalledAt: new Date().toISOString() });
   await db.$transaction([
     privacyRouteWrite(connection),
     db.orderDelivery.upsert({
@@ -53,6 +53,21 @@ export async function enqueueAppUninstall(connection) {
     db.session.deleteMany({ where: { shop } }),
     db.orderDelivery.deleteMany({ where: { shop, topic: { notIn: ["APP_UNINSTALLED", "PRIVACY_ROUTE"] } } }),
     db.storeConnection.deleteMany({ where: { shop } }),
+  ]);
+}
+
+// An uninstall for a store this app has no connection for (a disconnect that
+// half failed, say) still frees any Tagioo container left tied to it. A pending
+// uninstall job for the store is kept as it is: it already frees the container.
+export async function enqueueStoreRelease(shop) {
+  const payload = encodeProtectedPayload({ shop, uninstalledAt: new Date().toISOString() });
+  await db.$transaction([
+    db.orderDelivery.upsert({
+      where: { id: `${shop}:app-uninstalled` },
+      create: { id: `${shop}:app-uninstalled`, shop, topic: "APP_UNINSTALLED", payload },
+      update: {},
+    }),
+    db.session.deleteMany({ where: { shop } }),
   ]);
 }
 
@@ -94,9 +109,18 @@ export async function flushOrderDeliveries() {
         if (delivery.topic === "APP_UNINSTALLED") {
           const reconnected = await db.storeConnection.findUnique({ where: { shop: delivery.shop } });
           const sameConnection = reconnected
+            && payload.integrationToken
             && reconnected.tenantId === payload.tenantId
             && reconnected.integrationToken === payload.integrationToken;
-          if (!sameConnection) await disconnectShopifyBilling(payload);
+          if (!sameConnection) {
+            if (payload.integrationToken) await disconnectShopifyBilling(payload);
+            // The billing call frees the container only when the store's token
+            // still works (and billing is on); this frees it in every case.
+            await releaseStoreInTagioo({
+              shop: delivery.shop,
+              before: payload.uninstalledAt || new Date(delivery.createdAt || Date.now()).toISOString(),
+            });
+          }
         } else {
           await sendOrderToTagioo({ shop: delivery.shop, order: payload, topic: delivery.topic });
         }

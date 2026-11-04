@@ -177,6 +177,15 @@ export async function createTagiooContainer(admin, { shop, tenantId, fields }) {
 
 // "Use a different Tagioo account": this store stops using the workspace it
 // is linked to. Tagioo refuses while the store is connected to a container.
+// Frees any Tagioo container still tied to this store after an uninstall or a
+// disconnect. Signed with the app secret, so it works even when the store's own
+// Tagioo token is gone or stale. Containers the store connected to after
+// `before` (it reconnected) are left alone.
+export async function releaseStoreInTagioo({ shop, before }) {
+  if (!appSecretUsable) return { skipped: true };
+  return signedTagiooPost("/api/integrations/shopify/workspace", { shop, intent: "release", before });
+}
+
 export async function unlinkTagiooWorkspace({ shop, tenantId }) {
   requireAppLink();
   return signedTagiooPost("/api/integrations/shopify/workspace", { shop, intent: "unlink", tenantId });

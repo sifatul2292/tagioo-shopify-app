@@ -36,7 +36,7 @@ test('uninstall keeps encrypted privacy routes after sessions, active route and 
   const routing = moduleFunctions('./privacy-routing.server.js', 'privacyRouteWrite,retainPrivacyRoute,privacyConnections', { db, createHash, encodeProtectedPayload: encode, decodeProtectedPayload: decode });
   const worker = moduleFunctions('./order-delivery.server.js', 'enqueueAppUninstall,flushOrderDeliveries', {
     db, ...routing, encodeProtectedPayload: encode, decodeProtectedPayload: decode,
-    disconnectShopifyBilling: async () => {}, sendOrderToTagioo: async () => {},
+    disconnectShopifyBilling: async () => {}, sendOrderToTagioo: async () => {}, releaseStoreInTagioo: async () => {},
     orderDeliveryPayload: x => x, setInterval: () => ({ unref() {} }), setTimeout: () => ({ unref() {} }), console,
   });
   await worker.enqueueAppUninstall(active);

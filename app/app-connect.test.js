@@ -8,7 +8,7 @@ const actionSource = source.slice(source.indexOf("export const action"), source.
 const saveSource = source.slice(source.indexOf("async function saveConnection"), source.indexOf("const containerStatusText"));
 
 function harness({ connect, create } = {}) {
-  const calls = { connect: [], create: [], pixel: [], upsert: [], unlink: [], failDisconnect: false };
+  const calls = { connect: [], create: [], pixel: [], upsert: [], unlink: [], release: [], failDisconnect: false };
   const rows = new Map();
   const linked = { tenantId: "review", tenantName: "Review", trackingDomain: "https://review-track.tagioo.example", measurementId: "G-REVIEW", integrationToken: "t".repeat(64) };
   const ctx = vm.createContext({
@@ -36,6 +36,7 @@ function harness({ connect, create } = {}) {
     isNetworkError: (error) => /fetch failed/.test(error.message),
     unlinkTagiooWorkspace: async (input) => { calls.unlink.push(input); if (input.tenantId === "connected") throw new Error("Disconnect this store from its Tagioo container first, then choose a different account."); return { unlinked: true }; },
     disconnectShopifyBilling: async () => { if (calls.failDisconnect) throw new Error("The operation was aborted due to timeout"); },
+    releaseStoreInTagioo: async (input) => { calls.release.push(input); return { released: 1 }; },
     deleteWebPixel: async () => {},
     deleteQueuedOrdersForShop: async () => {},
   });
@@ -102,6 +103,9 @@ test("a timed-out disconnect names Tagioo, not Shopify, and keeps the store conn
   const ok = await run({ intent: "disconnect" });
   assert.equal(ok.ok, true);
   assert.equal(ok.connection, null);
+  // The container is freed in Tagioo even if the billing call met a stale token.
+  assert.equal(calls.release.length, 1);
+  assert.equal(calls.release[0].shop, "reviewer.myshopify.com");
 });
 
 test("the container form is hidden at the plan's container limit, with an upgrade note", () => {
